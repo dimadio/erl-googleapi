@@ -1,0 +1,13 @@
+{application, googleapi,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+		  hackney
+                 ]},
+  {mod, { googleapi, []}},
+  {env, []}
+ ]}.

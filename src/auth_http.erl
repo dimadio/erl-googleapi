@@ -1,0 +1,292 @@
+-module(auth_http).
+
+-behaviour(gen_server).
+
+
+-define (GOOGLE_AUTH_URI,   <<"https://accounts.google.com/o/oauth2/auth">>).
+-define (GOOGLE_REVOKE_URI, <<"https://accounts.google.com/o/oauth2/revoke">>).
+-define (GOOGLE_TOKEN_URI,  <<"https://accounts.google.com/o/oauth2/token">>).
+
+-define (MAX_TOKEN_LIFETIME_SECS, 3600). %% 1 hour in seconds
+
+-define(REFRESH_STATUS_CODES, [401]).
+
+
+-include_lib("public_key/include/public_key.hrl"). 
+
+
+
+-export([start_link/3,
+         init/1,
+         code_change/3,
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2,
+         terminate/2,
+	 stop/1]).
+
+-export([generate_refresh_request_body/1]).
+
+-export([get/3, get/2, post/4, delete/3]).
+
+get(Pid, Uri) ->
+    get(Pid, Uri, _Headers = []).
+get(Pid, Uri, Headers)->
+    gen_server:call(Pid, {get, Uri, Headers}).
+
+post(Pid, Uri, Headers, Postdata)->
+    gen_server:call(Pid, {post, Uri, Headers, Postdata}).
+
+
+delete(Pid, Uri, Headers)->
+    gen_server:call(Pid, {delete, Uri, Headers}).
+
+stop(Pid) ->
+    gen_server:cast(Pid, stop).
+
+init(Settings)->
+    PoolName = googleapi_pool,
+    Options = [{timeout, 150000}, {max_connections, 100}],
+    ok  = case  hackney_pool:start_pool(PoolName, Options) of
+	      {ok, _PoolPid} -> ok;
+	      {error, {already_started, _PoolPid}} -> ok;
+	      Other -> Other
+	  end,
+    {ok, Settings}.
+
+start_link( Service_account_name, Private_key, Scope)->
+    {ok, Binary} = file:read_file(Private_key),
+    gen_server:start_link( ?MODULE, [{service_account_name, Service_account_name},
+				     {private_key, base64:encode(Binary)},
+				     {private_key_password, 'notasecret'},
+				     {token_uri, ?GOOGLE_TOKEN_URI},
+				     {revoke_uri, ?GOOGLE_REVOKE_URI},
+				     {scope, scopes_to_string(Scope)}],[]).
+
+
+handle_call(CallData, _From, Config)->
+    {NewConfig2, Code, RespHead, FinalRespBody} = handle_request(CallData, Config),
+    {reply, {Code, RespHead, FinalRespBody}, NewConfig2}.
+
+handle_cast(stop, State) ->
+    {stop, normal, State};
+handle_cast(_Command, _Config) ->
+    ok.
+
+handle_info(_Command, _Config) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+terminate(normal, _State) ->
+    hackney_pool:stop_pool(googleapi_pool),
+    ok.
+
+
+
+%% -----------------------
+
+handle_request({Method, Uri, Headers}, Config) ->
+    handle_request({Method, Uri, Headers, <<>>}, Config);
+handle_request({Method, Uri, Headers, PostData}, Config) ->
+    AccessToken = proplists:get_value(access_token, Config),
+
+    NewConfig = 
+	case AccessToken of 
+	    undefined ->
+		refresh_token(Config);
+	    _ ->
+		Config
+	end,
+
+    UpdatedHeaders = apply_headers(Headers, NewConfig, PostData),
+
+    error_logger:info_msg("Send request: ~p~n", [{Method, Uri, UpdatedHeaders, PostData}]),
+
+    {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, Uri,
+							       UpdatedHeaders, PostData,
+							       [{pool, googleapi_pool}]),
+
+    {NewConfig2, Code, RespHead, FinalRespBody} = 
+	case lists:member(StatusCode, ?REFRESH_STATUS_CODES) of 
+	    true ->
+
+		NewCfg = refresh_token(NewConfig),
+
+		UpdatedHeaders2 = apply_headers(Headers, NewCfg, PostData),
+
+		{ok, StatusCode2, RespHeaders2, ClientRef2} = hackney:request(Method, Uri,
+									      UpdatedHeaders2, PostData,
+									      [{pool, googleapi_pool}]),
+		{ok, RespBody2} = get_body(RespHeaders2, ClientRef2),
+
+		{NewCfg, StatusCode2, RespHeaders2, RespBody2};
+	    false ->
+		{ok, RespBody} = get_body(RespHeaders, ClientRef),
+		{NewConfig, StatusCode, RespHeaders, RespBody}
+	end,
+    {NewConfig2, Code, RespHead, FinalRespBody}.
+
+
+get_body(Headers, Client)->	    
+    ContentLength = proplists:get_value(<<"Content-Length">>, Headers, <<"0">>),
+    IntContentLength = list_to_integer(binary:bin_to_list(ContentLength)),
+
+    case IntContentLength of
+	N when is_integer(N) andalso N > 0 ->
+	    {ok, Body,_ } = hackney:body(Client),
+	    {ok, Body};
+	N when is_integer(N) andalso N =:= 0 ->
+	    {ok, <<>>}
+    end.
+
+refresh_token(Config) ->
+    Body = utils:build_body(generate_refresh_request_body(Config)),
+    Headers = generate_refresh_request_headers(Config),
+
+
+    {ok, StatusCode, _RespHeaders, ClientRef} = hackney:request(post, ?GOOGLE_TOKEN_URI,
+								Headers, Body,
+								[{pool, googleapi_pool}]),
+    {ok, RespBody,_ } = hackney:body(ClientRef),
+
+
+    case StatusCode of
+	200 ->
+
+	    {RespJson} = jiffy:decode(RespBody),
+
+	    Config_1 = lists:keystore(token_response, 1, Config,   {token_response, {RespJson}}),
+	    Config_2 = lists:keystore(access_token,   1, Config_1, {access_token, proplists:get_value(<<"access_token">>, RespJson)}),
+	    Config_3 = lists:keystore(refresh_token,  1, Config_2, {refresh_token, proplists:get_value(<<"refresh_token">>, RespJson, undefined)}),
+
+	    Expires_in = proplists:get_value(<<"expires_in">>, RespJson, undefined),
+	    Config_4 = 
+		case Expires_in of 
+		    undefined ->
+			lists:keystore(token_expiry,  1, Config_3, {token_expiry, undefined});
+		    Number when is_integer(Number)->
+			lists:keystore(token_expiry,  1, Config_3, {token_expiry, now_sec(os:timestamp())+ Number})
+		end,
+
+	    Config_4;
+	_ ->
+	    Config
+    end.
+		
+
+generate_refresh_request_headers(_Config) ->
+    Headers = [
+	       {<<"content-type">>, <<"application/x-www-form-urlencoded">>}
+	      ],
+
+    %% if self.user_agent is not None:
+    %%    headers['user-agent'] = self.user_agent
+    Headers.   
+
+generate_refresh_request_body(Config)->
+	    Assertion = generate_assertion(Config),
+
+	    [{assertion, http_uri:encode(binary:bin_to_list(Assertion))},
+	     {grant_type, http_uri:encode("urn:ietf:params:oauth:grant-type:jwt-bearer")}
+	    ].
+
+
+scopes_to_string([H|_Rest] = Scopes) when is_list(H)->
+    string:join(Scopes, " ");
+scopes_to_string([H|_Rest] = Scopes) when is_integer(H)->
+    Scopes.
+
+
+generate_assertion(Config)->
+    %%5 Generate the assertion that will be used in the request.
+    Now = now_sec(os:timestamp() ),
+    Payload = {[
+	       {<<"aud">>, proplists:get_value(token_uri, Config)},
+	       {<<"scope">>, binary:list_to_bin(proplists:get_value(scope, Config))},
+	       {<<"iat">>, Now},
+	       {<<"exp">>, Now + ?MAX_TOKEN_LIFETIME_SECS},
+	       {<<"iss">>, binary:list_to_bin(proplists:get_value(service_account_name, Config))}
+	      ]},
+
+    Private_key = base64:decode(proplists:get_value(private_key, Config)),
+    Key = key_from_string(Private_key, proplists:get_value(private_key_password, Config)), 
+    make_signed_jwt(Key,  Payload).
+
+key_from_string(Private_key, _Private_key_password)->
+    [DSAEntry] = public_key:pem_decode(Private_key),
+    public_key:pem_entry_decode(DSAEntry).
+
+	
+make_signed_jwt(Key, Payload)->
+
+    Header = {[{<<"typ">>,<<"JWT">>}, {<<"alg">>,<<"RS256">>}]},
+
+    Segments = [
+		'_urlsafe_b64encode'('_json_encode'(Header)),
+		'_urlsafe_b64encode'('_json_encode'(Payload))
+	       ],
+
+    Signing_input = binary:list_to_bin(string:join(lists:map(fun binary:bin_to_list/1, Segments), ".")),
+
+
+    #'PrivateKeyInfo'{privateKeyAlgorithm =
+			  #'PrivateKeyInfo_privateKeyAlgorithm'{algorithm = Algo},
+		      privateKey = DataKey} = Key, 
+
+    SignKey = case Algo of 
+		  ?'id-dsa' ->
+		      public_key:der_decode('DSAPrivateKey', iolist_to_binary(DataKey));
+		  ?'rsaEncryption' ->
+		      public_key:der_decode('RSAPrivateKey', iolist_to_binary(DataKey));
+		  _ ->
+		      Key
+	      end,
+    Signature = public_key:sign(Signing_input, sha256, SignKey),
+    Segments2 = Segments ++ [ '_urlsafe_b64encode'(Signature)],
+
+
+    ListSegs = lists:map(fun (Elm) ->
+				 if
+				     is_binary(Elm) ->
+					 binary:bin_to_list(Elm);
+				     true ->
+					 Elm
+				 end
+			 end, Segments2),
+    StrRes = string:join(ListSegs , "."),
+    binary:list_to_bin(StrRes).
+
+
+apply_headers(Headers, Config, PostData)  ->
+    Access_token = proplists:get_value(access_token, Config),
+    HeadersWithAuth = [{<<"accept">>, <<"application/json">>} | 
+		       lists:keystore(<<"Authorization">>, 1, Headers, 
+				      {<<"Authorization">>, << <<"Bearer ">>/binary, Access_token/binary >>})],
+    case PostData of 
+	<<>> ->
+	    HeadersWithAuth;
+	_ ->
+	    [{<<"Content-Length">>, byte_size(PostData)}| HeadersWithAuth]
+    end.
+
+now_sec({MegaSecs,Secs,_MicroSecs})->
+    (MegaSecs*1000000 + Secs).
+
+
+'_json_encode'(Object)->
+    
+    case (catch jiffy:encode(Object) ) of 
+	{'EXIT', _Reason} = Err ->
+	    throw(Err);
+	Res ->
+	    Res
+    end.
+
+
+'_urlsafe_b64encode'(String)->
+    Encoded = base64:encode(String),
+    EncodedStr = binary:bin_to_list(Encoded),
+    binary:list_to_bin(string:strip(EncodedStr, right, $=)). %% remove trailing '=' and return binary
+    
