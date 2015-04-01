@@ -23,26 +23,26 @@
          handle_cast/2,
          handle_info/2,
          terminate/2,
-	 stop/1]).
+	 stop/0]).
 
 -export([generate_refresh_request_body/1]).
 
--export([get/3, get/2, post/4, delete/3]).
+-export([get/1, get/2, post/3, delete/2]).
 
-get(Pid, Uri) ->
-    get(Pid, Uri, _Headers = []).
-get(Pid, Uri, Headers)->
-    gen_server:call(Pid, {get, Uri, Headers}).
+get(Uri) ->
+    get(Uri, _Headers = []).
+get( Uri, Headers)->
+    gen_server:call( ?MODULE, {get, Uri, Headers}).
 
-post(Pid, Uri, Headers, Postdata)->
-    gen_server:call(Pid, {post, Uri, Headers, Postdata}).
+post(Uri, Headers, Postdata)->
+    gen_server:call(?MODULE, {post, Uri, Headers, Postdata}).
 
 
-delete(Pid, Uri, Headers)->
-    gen_server:call(Pid, {delete, Uri, Headers}).
+delete(Uri, Headers)->
+    gen_server:call( ?MODULE, {delete, Uri, Headers}).
 
-stop(Pid) ->
-    gen_server:cast(Pid, stop).
+stop() ->
+    gen_server:cast(?MODULE, stop).
 
 init(Settings)->
     PoolName = googleapi_pool,
@@ -56,7 +56,7 @@ init(Settings)->
 
 start_link( Service_account_name, Private_key, Scope)->
     {ok, Binary} = file:read_file(Private_key),
-    gen_server:start_link( ?MODULE, [{service_account_name, Service_account_name},
+    gen_server:start_link( {local, ?MODULE}, ?MODULE, [{service_account_name, Service_account_name},
 				     {private_key, base64:encode(Binary)},
 				     {private_key_password, 'notasecret'},
 				     {token_uri, ?GOOGLE_TOKEN_URI},
@@ -102,7 +102,7 @@ handle_request({Method, Uri, Headers, PostData}, Config) ->
 
     UpdatedHeaders = apply_headers(Headers, NewConfig, PostData),
 
-    error_logger:info_msg("Send request: ~p~n", [{Method, Uri, UpdatedHeaders, PostData}]),
+    %% error_logger:info_msg("Send request: ~p~n", [{Method, Uri, UpdatedHeaders, PostData}]),
 
     {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, Uri,
 							       UpdatedHeaders, PostData,

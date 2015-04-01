@@ -9,7 +9,7 @@
 -export([start/2, stop/1]).
 
 %% Service exports
--export([build/3]).
+-export([build/2]).
 
 
 %% ===================================================================
@@ -25,22 +25,21 @@ stop(_State) ->
 
 
 %%% service_functions
-build(Service, Version, AuthHttp) when  is_list(Service)->
-    build( binary:list_to_bin(Service), Version, AuthHttp);
+build(Service, Version) when  is_list(Service)->
+    build( binary:list_to_bin(Service), Version);
 
-build(Service, Version, AuthHttp) when  is_list(Version)->
-    build( Service, binary:list_to_bin(Version), AuthHttp);
+build(Service, Version) when  is_list(Version)->
+    build( Service, binary:list_to_bin(Version));
 
-build(Service, Version, AuthHttp) when is_binary(Service) andalso is_binary(Version) ->
-    ServiceUrl = << <<"https://www.googleapis.com/discovery/">>/binary, Version/binary,
-		    <<"/apis/">>/binary, Service/binary, <<"/v1/rest">>/binary >>,
+build(Service, Version) when is_binary(Service) andalso is_binary(Version) ->
+    ServiceUrl = << <<"https://www.googleapis.com/discovery/v1/apis/">>/binary,
+		    Service/binary, <<"/">>/binary, Version/binary, <<"/rest">>/binary >>,
     {ok, Json} = service_builder:bring_service_json(ServiceUrl),
     ok = service_builder:validate_service_json(Json, Service, Version),
 
-    googleapi_client:start_link(Service, 
+    googleapi_client:start_link( Service, 
 				Version,
-				_ServiceJson = Json, 
-				AuthHttp).
+				_ServiceJson = Json).
     
 
 
@@ -77,18 +76,18 @@ check_response( {Code, RespHead, RespBody} ) ->
 		    Items = proplists:get_value(<<"items">>, RespJson),
 		    case Items of
 			undefined ->
-			    ok;
+			    ok%% ,
 			    %% ?debugFmt("Response json: ~p", [RespJson])
+				;
 
 			_ ->
-			    %% lager:info("~nItems=~p~n", [Items]),
 			    lists:foldl(fun ({Item}, _) ->
 					ItemId = proplists:get_value(<<"id">>, Item),
 						?debugFmt("Found item ~p", [ItemId])
 					end, 0, Items)
 		    end;
 		_ ->
-		    ok
+		    ok%% ,
 		    %% ?debugFmt("Response headers=~p~n", [RespHead]),
 		    %% ?debugFmt("~nResponse content=~p~n", [RespBody])
 	    end,
@@ -113,65 +112,105 @@ check_response( {Code, RespHead, RespBody} ) ->
 %% 	    error
 %%     end.
 
-build_test_()->
-    io:format("Run build_test ~n"),
+test_storage_init()->
+    ?debugFmt("Run build storage test ~n",[]),
     application:start(asn1),
     hackney:start(),
 
-    {ok, AuthHttp} = auth_http:start_link(_Service_account_name = "EMAIL",
-					  _Private_key = "PEM PATH",
-					  _Scope="https://www.googleapis.com/auth/devstorage.full_control"),
-    {ok, Client} = build("storage", "v1", AuthHttp),
+    HTTPAuth = auth_http:start_link(_Service_account_name = "EMAIL",
+				    _Private_key = "PEM_PATH",
+				    _Scope="https://www.googleapis.com/auth/devstorage.full_control"),
 
+    ?debugFmt("HTTPAuth = ~p~n",[ HTTPAuth] ),
+
+    ClientRes = build("storage", "v1"),
+    ?debugFmt("ClientRes = ~p~n",[ ClientRes] ),
+    ok.
+
+
+build_test_()->
     Bucket_name = <<"testbucket24566">>,
     Bucket_object = jiffy:encode({[{<<"name">>, Bucket_name}]}),
     ?debugFmt("Bucket_object=~p~n", [Bucket_object]),
-    [ 
-      ?_assertEqual(ok, check_response(googleapi_client:call(Client, "buckets", "insert", [{<<"project">>,<<"wixpop-gce">>}, 
-											   {'content-type', <<"application/json">>},
-											   {body, Bucket_object  }
-											  ])) ),
 
-      ?_assertEqual(ok, check_response(googleapi_client:call(Client, "buckets", "list", [{<<"project">>,<<"wixpop-gce">>}, 
-      											 {<<"prefix">>, <<"wixtestbucket">>}])) ),
+    [
+     ?_assert(  test_storage_init() == ok  ),
+     ?_assertEqual(ok, check_response(googleapi_client:call("storage", "buckets", "insert", [{<<"project">>,<<"wixpop-gce">>}, 
+											     {'content-type', <<"application/json">>},
+											     {body, Bucket_object  }
+											    ])) ),
 
-      %%-------------------------------
+     ?_assertEqual(ok, check_response(googleapi_client:call("storage", "buckets", "list", [{<<"project">>,<<"wixpop-gce">>}, 
+											   {<<"prefix">>, <<"wixtestbucket">>}])) ),
 
-      ?_assertEqual(ok, check_response(googleapi_client:call(Client, "objects", "list", [{<<"bucket">>,Bucket_name}, {<<"maxResults">>, <<"10">>}])) ),
-      ?_assertEqual({error,"Unsupported method lista"}, 
-      		    check_response(googleapi_client:call(Client, "objects", "lista", [{<<"bucket">>,Bucket_name}, {<<"maxResults">>, <<"10">>}])) ),
-      ?_assertEqual({error,"Required parameter 'bucket' not found"}, 
-      		    check_response(googleapi_client:call(Client, "objects", "list", [{<<"prefix">>, <<"micons/">>}, {<<"maxResults">>, <<"10">>}])) ),
-      %%-------------------------------
+     %%-------------------------------
 
-      ?_assertEqual(ok, 
-      		    check_response(googleapi_client:call(Client, "objects", "insert", [{<<"bucket">>,Bucket_name},
-      										       {<<"name">>, <<"erltest3.txt">>},
-      										       {'content-type', <<"text/plain">>},
-      										       {body, <<"sometext data\ndata5">>}])) ),
+     ?_assertEqual(ok, check_response(googleapi_client:call("storage", "objects", "list", [{<<"bucket">>,Bucket_name}, {<<"maxResults">>, <<"10">>}])) ),
+     ?_assertEqual({error,"Unsupported method lista"}, 
+		   check_response(googleapi_client:call("storage", "objects", "lista", [{<<"bucket">>,Bucket_name}, {<<"maxResults">>, <<"10">>}])) ),
+     ?_assertEqual({error,"Required parameter 'bucket' not found"}, 
+		   check_response(googleapi_client:call("storage", "objects", "list", [{<<"prefix">>, <<"micons/">>}, {<<"maxResults">>, <<"10">>}])) ),
+     %%-------------------------------
 
-      ?_assertEqual(ok, 
-      		    check_response(googleapi_client:call(Client, "objects", "list", [{<<"bucket">>,Bucket_name}])) ),
+     ?_assertEqual(ok, 
+		   check_response(googleapi_client:call("storage", "objects", "insert", [{<<"bucket">>,Bucket_name},
+											 {<<"name">>, <<"erltest3.txt">>},
+											 {'content-type', <<"text/plain">>},
+											 {body, <<"sometext data\ndata5">>}])) ),
 
-      ?_assertEqual(ok, 
-       		    check_response(googleapi_client:call(Client, "objects", "get", [{<<"bucket">>,Bucket_name},
-      										    {<<"object">>, <<"erltest3.txt">>}])) ),
+     ?_assertEqual(ok, 
+		   check_response(googleapi_client:call("storage", "objects", "list", [{<<"bucket">>,Bucket_name}])) ),
 
-      ?_assertEqual(ok, 
-      		    check_response(googleapi_client:call(Client, "objects", "get_media", [{<<"bucket">>,Bucket_name},
-      											  {<<"object">>, <<"erltest3.txt">>}])) ),
+     ?_assertEqual(ok, 
+		   check_response(googleapi_client:call("storage", "objects", "get", [{<<"bucket">>,Bucket_name},
+										      {<<"object">>, <<"erltest3.txt">>}])) ),
 
-      ?_assertEqual(ok, 
-      		    check_response_delete(googleapi_client:call(Client, "objects", "delete", [{<<"bucket">>,Bucket_name},
-      											      {<<"object">>, <<"erltest3.txt">>}])) ),
+     ?_assertEqual(ok, 
+		   check_response(googleapi_client:call("storage", "objects", "get_media", [{<<"bucket">>,Bucket_name},
+											    {<<"object">>, <<"erltest3.txt">>}])) ),
 
-
-      ?_assertEqual(ok, 
-       		    check_response_delete(googleapi_client:call(Client, "buckets", "delete", [{<<"bucket">>,Bucket_name}])) ),
+     ?_assertEqual(ok, 
+		   check_response_delete(googleapi_client:call("storage", "objects", "delete", [{<<"bucket">>,Bucket_name},
+												{<<"object">>, <<"erltest3.txt">>}])) ),
 
 
-      ?_assertEqual(ok, googleapi_client:stop(Client))
+     ?_assertEqual(ok, 
+		   check_response_delete(googleapi_client:call("storage", "buckets", "delete", [{<<"bucket">>,Bucket_name}])) ),
+
+
+     ?_assertEqual(ok, googleapi_client:stop("storage")),
+      ?_assertEqual(ok, auth_http:stop())
+    ]
+	.
+
+
+test_bq_init()->
+    ?debugFmt("Run build bq test ~n",[]),
+    application:start(asn1),
+    hackney:start(),
+
+    HTTPAuth = auth_http:start_link(_Service_account_name = "EMAIL",
+				    _Private_key = "PEM_PATH",
+				    _Scope="https://www.googleapis.com/auth/bigquery"),
+
+    ?debugFmt("HTTPAuth = ~p~n",[ HTTPAuth] ),
+
+    ClientRes = build("bigquery", "v2"),
+    ?debugFmt("ClientRes = ~p~n",[ ClientRes] ),
+    ok.
+
+
+build_bq_test_()->
+    Bucket_name = <<"testbucket24566">>,
+    Bucket_object = jiffy:encode({[{<<"name">>, Bucket_name}]}),
+    ?debugFmt("Bucket_object=~p~n", [Bucket_object]),
+
+    [
+     ?_assert(  test_bq_init() == ok  ),
+     ?_assertEqual(ok, check_response(googleapi_client:call("bigquery", "datasets", "list", [{<<"projectId">>, <<"wixpop-gce">>}])) ),
+     ?_assertEqual(ok, googleapi_client:stop("bigquery")),
+     ?_assertEqual(ok, auth_http:stop())
     ].
 
-
 -endif.
+

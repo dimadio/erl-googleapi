@@ -7,7 +7,7 @@
 
 
 
--export([start_link/4,
+-export([start_link/3,
          init/1,
          code_change/3,
          handle_call/3,
@@ -18,20 +18,19 @@
 
 -export([call/4]).
 
-call(Pid, Object, Command, Params)->
-    gen_server:call(Pid, {call, {Object, Command, Params}}).
+call(Service, Object, Command, Params)->
+    gen_server:call( get_service_name(Service) , {call, {Object, Command, Params}}).
 
-stop(Pid) ->
-    gen_server:cast(Pid, stop).
+stop(Service) ->
+    gen_server:cast(get_service_name(Service), stop).
 
 init(Settings)->
     {ok, Settings}.
 
-start_link(Service, Version, Json, Auth_http)->
+start_link(Service, Version, Json)->
 
-    gen_server:start_link( ?MODULE, [{service, Service},
+    gen_server:start_link( {local, get_service_name(Service)},  ?MODULE, [{service, Service},
 				     {version, Version},
-				     {http, Auth_http}, 
 				     {json, Json}],[]).
 
 
@@ -59,7 +58,7 @@ handle_call({call, {Object, Command, Params}}, _From, Config) when is_binary(Com
 
     Result = (catch do_handle_call(Object, UpdatedCommand, UpdatedParams, Config)) ,
     {reply, Result, Config};
-handle_call(CallData, _From, Config)->
+handle_call(_CallData, _From, Config)->
     {reply, ok, Config}.
 
 handle_cast(stop, State) ->
@@ -85,7 +84,6 @@ terminate({error, Reason}, _State) ->
 %%% --------------------
 
 do_handle_call(Object, Command, Params, Config)->
-    Auth_http = proplists:get_value(http, Config),
     ObjectJson = service_builder:get_object_json(proplists:get_value(json, Config), Object),
 
     {MethodJson} = service_builder:get_method_json(ObjectJson, Command),
@@ -95,11 +93,11 @@ do_handle_call(Object, Command, Params, Config)->
 
 	    case Method of 
 		<<"GET">> ->
-		    auth_http:get(Auth_http, Uri, Headers);
+		    auth_http:get(Uri, Headers);
 		<<"POST">> ->
-		    auth_http:post(Auth_http, Uri, Headers, Payload);
+		    auth_http:post(Uri, Headers, Payload);
 		<<"DELETE">> ->
-		    auth_http:delete(Auth_http, Uri, Headers)
+		    auth_http:delete(Uri, Headers)
 	    end
     end.
     
@@ -207,3 +205,17 @@ build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], MethodJson,
     
 convert_qs_to_bin(QS)->
     binary:list_to_bin(utils:url_encode(QS)).
+
+
+
+
+
+get_service_name(Service) when is_binary(Service) ->
+    list_to_atom(binary:bin_to_list(Service));
+
+get_service_name(Service) when is_list(Service) ->
+    list_to_atom(Service);
+
+get_service_name(Service) when is_atom(Service) ->
+    Service.
+
