@@ -1,6 +1,9 @@
 -module(googleapi).
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+
+-define(USER_EMAIL, "EMAIL").
+-define(PEM_FILE, "PEM FILE").
 -endif.
 
 -behaviour(application).
@@ -11,20 +14,48 @@
 %% Service exports
 -export([build/2]).
 
+-export([start_deps/0, init_credentials/3, close_credentials/0]).
+
+
 
 %% ===================================================================
 %% Application callbacks
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
+    start_deps(),
     googleapi_sup:start_link().
 
 stop(_State) ->
     ok.
 
+start_deps() ->
+    ok = ensure_started([ asn1, public_key, ssl, hackney]).
 
+
+init_credentials(Service_account_name, Private_key, Scope)->
+    googleapi_sup:add_child(auth_http, 
+			    auth_http, 
+			    worker, 
+			    [Service_account_name, Private_key, Scope]).
+
+close_credentials()->
+    googleapi_sup:stop_child(auth_http).
 
 %%% service_functions
+
+
+ensure_started([]) ->
+    ok;
+ensure_started([App|RestApps]) ->
+    case application:ensure_started(App) of 
+	ok ->
+	    ensure_started(RestApps);
+	Other ->
+	    {error, Other}
+    end.
+
+
 build(Service, Version) when  is_list(Service)->
     build( binary:list_to_bin(Service), Version);
 
@@ -37,9 +68,9 @@ build(Service, Version) when is_binary(Service) andalso is_binary(Version) ->
     {ok, Json} = service_builder:bring_service_json(ServiceUrl),
     ok = service_builder:validate_service_json(Json, Service, Version),
 
-    googleapi_client:start_link( Service, 
+    googleapi_sup:add_child(Service, googleapi_client, worker, [Service, 
 				Version,
-				_ServiceJson = Json).
+				_ServiceJson = Json]).
     
 
 
@@ -64,7 +95,6 @@ check_response( {Code, RespHead, RespBody} ) ->
 	    
 	    case binary:longest_common_prefix([Content_Type, <<"application/json">>]) of
 		16  -> %% length of application/json
-		    %% ?debugFmt("RespBody: ~p", [RespBody]),
 		    RespJson = case RespBody of 
 				   <<>> ->
 				       [];
@@ -76,9 +106,8 @@ check_response( {Code, RespHead, RespBody} ) ->
 		    Items = proplists:get_value(<<"items">>, RespJson),
 		    case Items of
 			undefined ->
-			    ok%% ,
-			    %% ?debugFmt("Response json: ~p", [RespJson])
-				;
+			    %% ?debugFmt("Response json: ~p", [RespJson]),
+			    ok;
 
 			_ ->
 			    lists:foldl(fun ({Item}, _) ->
@@ -87,9 +116,7 @@ check_response( {Code, RespHead, RespBody} ) ->
 					end, 0, Items)
 		    end;
 		_ ->
-		    ok%% ,
-		    %% ?debugFmt("Response headers=~p~n", [RespHead]),
-		    %% ?debugFmt("~nResponse content=~p~n", [RespBody])
+		    ok
 	    end,
 	    ok;
 	_ ->
@@ -114,12 +141,14 @@ check_response( {Code, RespHead, RespBody} ) ->
 
 test_storage_init()->
     ?debugFmt("Run build storage test ~n",[]),
-    application:start(asn1),
-    hackney:start(),
 
-    HTTPAuth = auth_http:start_link(_Service_account_name = "EMAIL",
-				    _Private_key = "PEM_PATH",
-				    _Scope="https://www.googleapis.com/auth/devstorage.full_control"),
+    ok = application:ensure_started(googleapi),
+    %% hackney:start(),
+
+
+    HTTPAuth = googleapi:init_credentials(_Service_account_name = ?USER_EMAIL,
+					  _Private_key = ?PEM_FILE,
+					  _Scope="https://www.googleapis.com/auth/devstorage.full_control"),
 
     ?debugFmt("HTTPAuth = ~p~n",[ HTTPAuth] ),
 
@@ -179,19 +208,19 @@ build_test_()->
 
 
      ?_assertEqual(ok, googleapi_client:stop("storage")),
-      ?_assertEqual(ok, auth_http:stop())
+      ?_assertEqual(ok, googleapi:close_credentials())
     ]
 	.
 
 
 test_bq_init()->
     ?debugFmt("Run build bq test ~n",[]),
-    application:start(asn1),
-    hackney:start(),
 
-    HTTPAuth = auth_http:start_link(_Service_account_name = "EMAIL",
-				    _Private_key = "PEM_PATH",
-				    _Scope="https://www.googleapis.com/auth/bigquery"),
+    ok = application:ensure_started(googleapi),
+
+    HTTPAuth = googleapi:init_credentials(_Service_account_name = ?USER_EMAIL,
+    			     _Private_key = ?PEM_FILE,
+    			     _Scope="https://www.googleapis.com/auth/bigquery"),
 
     ?debugFmt("HTTPAuth = ~p~n",[ HTTPAuth] ),
 
@@ -201,15 +230,15 @@ test_bq_init()->
 
 
 build_bq_test_()->
-    Bucket_name = <<"testbucket24566">>,
-    Bucket_object = jiffy:encode({[{<<"name">>, Bucket_name}]}),
-    ?debugFmt("Bucket_object=~p~n", [Bucket_object]),
 
     [
      ?_assert(  test_bq_init() == ok  ),
      ?_assertEqual(ok, check_response(googleapi_client:call("bigquery", "datasets", "list", [{<<"projectId">>, <<"wixpop-gce">>}])) ),
+     ?_assertEqual(ok, check_response(googleapi_client:call("bigquery", "tables", "list", [{<<"projectId">>, <<"wixpop-gce">>},
+											  {<<"datasetId">>, <<"prospero">>}])) ),
+
      ?_assertEqual(ok, googleapi_client:stop("bigquery")),
-     ?_assertEqual(ok, auth_http:stop())
+     ?_assertEqual(ok, googleapi:close_credentials())
     ].
 
 -endif.

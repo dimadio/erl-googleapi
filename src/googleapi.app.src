@@ -5,8 +5,7 @@
   {registered, []},
   {applications, [
                   kernel,
-                  stdlib,
-		  hackney
+                  stdlib
                  ]},
   {mod, { googleapi, []}},
   {env, []}
