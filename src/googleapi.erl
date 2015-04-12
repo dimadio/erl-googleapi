@@ -4,6 +4,7 @@
 
 -define(USER_EMAIL, "EMAIL").
 -define(PEM_FILE, "PEM FILE").
+
 -endif.
 
 -behaviour(application).
@@ -14,7 +15,7 @@
 %% Service exports
 -export([build/2]).
 
--export([start_deps/0, init_credentials/3, close_credentials/0]).
+-export([start_deps/0, init_credentials/3, close_credentials/0, call/4, stop_client/1]).
 
 
 
@@ -42,6 +43,12 @@ init_credentials(Service_account_name, Private_key, Scope)->
 close_credentials()->
     googleapi_sup:stop_child(auth_http).
 
+call(Service, Object, Command, Params) ->
+    googleapi_client:call(Service, Object, Command, Params).
+
+
+stop_client(Client)->
+    googleapi_client:stop(Client).
 %%% service_functions
 
 
@@ -164,50 +171,50 @@ build_test_()->
 
     [
      ?_assert(  test_storage_init() == ok  ),
-     ?_assertEqual(ok, check_response(googleapi_client:call("storage", "buckets", "insert", [{<<"project">>,<<"wixpop-gce">>}, 
+     ?_assertEqual(ok, check_response(googleapi:call("storage", "buckets", "insert", [{<<"project">>,<<"wixpop-gce">>}, 
 											     {'content-type', <<"application/json">>},
 											     {body, Bucket_object  }
 											    ])) ),
 
-     ?_assertEqual(ok, check_response(googleapi_client:call("storage", "buckets", "list", [{<<"project">>,<<"wixpop-gce">>}, 
+     ?_assertEqual(ok, check_response(googleapi:call("storage", "buckets", "list", [{<<"project">>,<<"wixpop-gce">>}, 
 											   {<<"prefix">>, <<"wixtestbucket">>}])) ),
 
      %%-------------------------------
 
-     ?_assertEqual(ok, check_response(googleapi_client:call("storage", "objects", "list", [{<<"bucket">>,Bucket_name}, {<<"maxResults">>, <<"10">>}])) ),
+     ?_assertEqual(ok, check_response(googleapi:call("storage", "objects", "list", [{<<"bucket">>,Bucket_name}, {<<"maxResults">>, <<"10">>}])) ),
      ?_assertEqual({error,"Unsupported method lista"}, 
-		   check_response(googleapi_client:call("storage", "objects", "lista", [{<<"bucket">>,Bucket_name}, {<<"maxResults">>, <<"10">>}])) ),
+		   check_response(googleapi:call("storage", "objects", "lista", [{<<"bucket">>,Bucket_name}, {<<"maxResults">>, <<"10">>}])) ),
      ?_assertEqual({error,"Required parameter 'bucket' not found"}, 
-		   check_response(googleapi_client:call("storage", "objects", "list", [{<<"prefix">>, <<"micons/">>}, {<<"maxResults">>, <<"10">>}])) ),
+		   check_response(googleapi:call("storage", "objects", "list", [{<<"prefix">>, <<"micons/">>}, {<<"maxResults">>, <<"10">>}])) ),
      %%-------------------------------
 
      ?_assertEqual(ok, 
-		   check_response(googleapi_client:call("storage", "objects", "insert", [{<<"bucket">>,Bucket_name},
+		   check_response(googleapi:call("storage", "objects", "insert", [{<<"bucket">>,Bucket_name},
 											 {<<"name">>, <<"erltest3.txt">>},
 											 {'content-type', <<"text/plain">>},
 											 {body, <<"sometext data\ndata5">>}])) ),
 
      ?_assertEqual(ok, 
-		   check_response(googleapi_client:call("storage", "objects", "list", [{<<"bucket">>,Bucket_name}])) ),
+		   check_response(googleapi:call("storage", "objects", "list", [{<<"bucket">>,Bucket_name}])) ),
 
      ?_assertEqual(ok, 
-		   check_response(googleapi_client:call("storage", "objects", "get", [{<<"bucket">>,Bucket_name},
+		   check_response(googleapi:call("storage", "objects", "get", [{<<"bucket">>,Bucket_name},
 										      {<<"object">>, <<"erltest3.txt">>}])) ),
 
      ?_assertEqual(ok, 
-		   check_response(googleapi_client:call("storage", "objects", "get_media", [{<<"bucket">>,Bucket_name},
+		   check_response(googleapi:call("storage", "objects", "get_media", [{<<"bucket">>,Bucket_name},
 											    {<<"object">>, <<"erltest3.txt">>}])) ),
 
      ?_assertEqual(ok, 
-		   check_response_delete(googleapi_client:call("storage", "objects", "delete", [{<<"bucket">>,Bucket_name},
+		   check_response_delete(googleapi:call("storage", "objects", "delete", [{<<"bucket">>,Bucket_name},
 												{<<"object">>, <<"erltest3.txt">>}])) ),
 
 
      ?_assertEqual(ok, 
-		   check_response_delete(googleapi_client:call("storage", "buckets", "delete", [{<<"bucket">>,Bucket_name}])) ),
+		   check_response_delete(googleapi:call("storage", "buckets", "delete", [{<<"bucket">>,Bucket_name}])) ),
 
 
-     ?_assertEqual(ok, googleapi_client:stop("storage")),
+     ?_assertEqual(ok, googleapi:stop_client("storage")),
       ?_assertEqual(ok, googleapi:close_credentials())
     ]
 	.
@@ -233,11 +240,11 @@ build_bq_test_()->
 
     [
      ?_assert(  test_bq_init() == ok  ),
-     ?_assertEqual(ok, check_response(googleapi_client:call("bigquery", "datasets", "list", [{<<"projectId">>, <<"wixpop-gce">>}])) ),
-     ?_assertEqual(ok, check_response(googleapi_client:call("bigquery", "tables", "list", [{<<"projectId">>, <<"wixpop-gce">>},
+     ?_assertEqual(ok, check_response(googleapi:call("bigquery", "datasets", "list", [{<<"projectId">>, <<"wixpop-gce">>}])) ),
+     ?_assertEqual(ok, check_response(googleapi:call("bigquery", "tables", "list", [{<<"projectId">>, <<"wixpop-gce">>},
 											  {<<"datasetId">>, <<"prospero">>}])) ),
 
-     ?_assertEqual(ok, googleapi_client:stop("bigquery")),
+     ?_assertEqual(ok, googleapi:stop_client("bigquery")),
      ?_assertEqual(ok, googleapi:close_credentials())
     ].
 
