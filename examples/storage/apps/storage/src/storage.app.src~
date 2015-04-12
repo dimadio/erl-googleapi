@@ -1,0 +1,12 @@
+{application, storage,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { storage_app, []}},
+  {env, []}
+ ]}.

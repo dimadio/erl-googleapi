@@ -1,0 +1,13 @@
+{application, storage,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+		  googleapi
+                 ]},
+  {mod, { storage_app, []}},
+  {env, []}
+ ]}.
