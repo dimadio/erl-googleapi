@@ -31,7 +31,7 @@ stop(_State) ->
     ok.
 
 start_deps() ->
-    ok = ensure_started([ asn1, public_key, ssl, hackney]).
+    ok = ensure_started([crypto, asn1, public_key, ssl, hackney]).
 
 
 init_credentials(Service_account_name, Private_key, Scope)->
