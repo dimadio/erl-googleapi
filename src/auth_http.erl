@@ -156,6 +156,29 @@ get_body(Headers, Client)->
     end.
 
 refresh_token(Config) ->
+    case proplists:get_value(auth_mode, Config, undefined) of 
+	appscope ->
+	    refresh_token_service(Config);
+	keyfile ->
+	    refresh_token_file(Config)
+    end.
+    
+refresh_token_service(Config) ->
+    TokenData = get_app_service_property(<<"token">>),
+    {RespJson} = jiffy:decode(TokenData),
+    
+    Config_1 = lists:keystore(access_token,   1, Config, {access_token, proplists:get_value(<<"access_token">>, RespJson)}),
+
+    Expires_in = proplists:get_value(<<"expires_in">>, RespJson, undefined),
+    case Expires_in of 
+	undefined ->
+	    lists:keystore(token_expiry,  1, Config_1, {token_expiry, undefined});
+	Number when is_integer(Number)->
+	    lists:keystore(token_expiry,  1, Config_1, {token_expiry, now_sec(os:timestamp())+ Number})
+    end.
+
+
+refresh_token_file(Config) ->
     Body = utils:build_body(generate_refresh_request_body(Config)),
     Headers = generate_refresh_request_headers(Config),
 
@@ -322,6 +345,7 @@ get_app_service_property(Property) when is_binary(Property)->
 							       []),
     
     {ok, RespBody,_ } = hackney:body(ClientRef),
+    io:format("RespBody is ~p~n", [RespBody]),
     RespBody.
 		
 	    
