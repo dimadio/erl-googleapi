@@ -17,6 +17,7 @@
 
 
 -export([start_link/3,
+	 start_link/0,
          init/1,
          code_change/3,
          handle_call/3,
@@ -54,14 +55,27 @@ init(Settings)->
 	  end,
     {ok, Settings}.
 
+
+start_link( )->
+    gen_server:start_link( {local, ?MODULE}, ?MODULE, [
+						       {auth_mode, appscope},
+						       {service_account_name, get_app_service_account()},
+						       {token_uri, ?GOOGLE_TOKEN_URI},
+						       {revoke_uri, ?GOOGLE_REVOKE_URI},
+						       {scope, get_app_service_scope()}
+						      ],[]).
+
 start_link( Service_account_name, Private_key, Scope)->
     {ok, Binary} = file:read_file(Private_key),
-    gen_server:start_link( {local, ?MODULE}, ?MODULE, [{service_account_name, Service_account_name},
-				     {private_key, base64:encode(Binary)},
-				     {private_key_password, 'notasecret'},
-				     {token_uri, ?GOOGLE_TOKEN_URI},
-				     {revoke_uri, ?GOOGLE_REVOKE_URI},
-				     {scope, scopes_to_string(Scope)}],[]).
+    gen_server:start_link( {local, ?MODULE}, ?MODULE, [
+						       {auth_mode, keyfile},
+						       {service_account_name, Service_account_name},
+						       {private_key, base64:encode(Binary)},
+						       {private_key_password, 'notasecret'},
+						       {token_uri, ?GOOGLE_TOKEN_URI},
+						       {revoke_uri, ?GOOGLE_REVOKE_URI},
+						       {scope, scopes_to_string(Scope)}
+						      ],[]).
 
 
 handle_call(CallData, _From, Config)->
@@ -290,3 +304,24 @@ now_sec({MegaSecs,Secs,_MicroSecs})->
     EncodedStr = binary:bin_to_list(Encoded),
     binary:list_to_bin(string:strip(EncodedStr, right, $=)). %% remove trailing '=' and return binary
     
+
+
+%% @doc returns binary of instance default service account
+get_app_service_account()->
+    get_app_service_property(<<"email">>).
+
+
+get_app_service_scope()->
+    get_app_service_property(<<"scopes">>).
+
+get_app_service_property(Property) when is_binary(Property)->
+    BaseUrl = <<"http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/">>,
+    Url = << BaseUrl/binary, Property/binary >>,
+    {ok, 200, _RespHeaders, ClientRef} = hackney:request(get, Url,
+							       [{<<"Metadata-Flavor">>,<<"Google">>}], <<>>,
+							       []),
+    
+    {ok, RespBody,_ } = hackney:body(ClientRef),
+    RespBody.
+		
+	    
