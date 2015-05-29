@@ -15,7 +15,7 @@
 %% Service exports
 -export([build/2]).
 
--export([start_deps/0, init_credentials/3, close_credentials/0, call/4, stop_client/1]).
+-export([start_deps/0, init_credentials/3, init_credentials/1, close_credentials/0, call/4, stop_client/1]).
 
 
 
@@ -39,6 +39,12 @@ init_credentials(Service_account_name, Private_key, Scope)->
 			    auth_http, 
 			    worker, 
 			    [Service_account_name, Private_key, Scope]).
+
+init_credentials(service)->
+    googleapi_sup:add_child(auth_http, 
+			    auth_http, 
+			    worker, 
+			    []).
 
 close_credentials()->
     googleapi_sup:stop_child(auth_http).
