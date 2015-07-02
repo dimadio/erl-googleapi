@@ -30,20 +30,30 @@
 
 -export([get/1, get/2, post/3, delete/2]).
 
+-export([get_access_token/0, refresh_access_token/0]).
+
 get(Uri) ->
     get(Uri, _Headers = []).
 get( Uri, Headers)->
-    gen_server:call( ?MODULE, {get, Uri, Headers}).
+    handle_request(get, Uri, Headers).
 
 post(Uri, Headers, Postdata)->
-    gen_server:call(?MODULE, {post, Uri, Headers, Postdata}).
+    handle_request(post, Uri, Headers, Postdata).
 
 
 delete(Uri, Headers)->
-    gen_server:call( ?MODULE, {delete, Uri, Headers}).
+    handle_request( delete, Uri, Headers).
 
 stop() ->
     gen_server:cast(?MODULE, stop).
+
+
+get_access_token()->
+    gen_server:call( ?MODULE, get_access_token).
+
+refresh_access_token()->
+    gen_server:call( ?MODULE, refresh_access_token).
+
 
 init(Settings)->
     PoolName = googleapi_pool,
@@ -78,17 +88,48 @@ start_link( Service_account_name, Private_key, Scope)->
 						      ],[]).
 
 
-handle_call(CallData, _From, Config)->
-    {NewConfig2, Code, RespHead, FinalRespBody} = handle_request(CallData, Config),
-    {reply, {Code, RespHead, FinalRespBody}, NewConfig2}.
+
+handle_call(get_access_token, _From ,Config)->
+    AccessToken = proplists:get_value(access_token, Config),
+
+    NewConfig = 
+	case AccessToken of 
+	    undefined ->
+		refresh_token(Config);
+	    _ ->
+		Config
+	end,
+
+    %% Refresh key to expire beforehand
+    Expired_in = proplists:get_value(token_expiry, NewConfig),
+    Now =  now_sec(os:timestamp()),
+    case Expired_in - Now of
+	Soon when Soon < 60 ->
+	    error_logger:info_msg("Token to expire - renew!\n"),
+	    spawn( fun() -> refresh_access_token() end );
+	_ ->
+	    ok
+    end,
+    {reply,  [{access_token, proplists:get_value(access_token, NewConfig) }],  NewConfig};
+
+handle_call(ref_access_token, _From ,Config)->
+    NewConfig = refresh_token(Config),
+    {reply,  [{access_token, proplists:get_value(access_token, NewConfig) }],  NewConfig};
+handle_call(Command, _From, State) ->
+    error_logger:info_msg("Unsupported command: ~p~n", [Command]),
+    {noreply, State}.
+
+
 
 handle_cast(stop, State) ->
     {stop, normal, State};
-handle_cast(_Command, _Config) ->
-    ok.
+handle_cast(Command, State) ->
+    error_logger:info_msg("Unsupported command: ~p~n", [Command]),
+    {noreply, State}.
 
-handle_info(_Command, _Config) ->
-    ok.
+handle_info(Command,State) ->
+    error_logger:info_msg("Unsupported command: ~p~n", [Command]),
+    {noreply, State}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -101,18 +142,12 @@ terminate(normal, _State) ->
 
 %% -----------------------
 
-handle_request({Method, Uri, Headers}, Config) ->
-    handle_request({Method, Uri, Headers, <<>>}, Config);
-handle_request({Method, Uri, Headers, PostData}, Config) ->
-    AccessToken = proplists:get_value(access_token, Config),
+handle_request(Method, Uri, Headers) ->
+    handle_request(Method, Uri, Headers, <<>>).
+handle_request(Method, Uri, Headers, PostData) ->
 
-    NewConfig = 
-	case AccessToken of 
-	    undefined ->
-		refresh_token(Config);
-	    _ ->
-		Config
-	end,
+
+    NewConfig = get_access_token(),
 
     UpdatedHeaders = apply_headers(Headers, NewConfig, PostData),
 
@@ -122,25 +157,25 @@ handle_request({Method, Uri, Headers, PostData}, Config) ->
 							       UpdatedHeaders, PostData,
 							       [{pool, googleapi_pool}]),
 
-    {NewConfig2, Code, RespHead, FinalRespBody} = 
-	case lists:member(StatusCode, ?REFRESH_STATUS_CODES) of 
-	    true ->
 
-		NewCfg = refresh_token(NewConfig),
+    case lists:member(StatusCode, ?REFRESH_STATUS_CODES) of 
+	true ->
 
-		UpdatedHeaders2 = apply_headers(Headers, NewCfg, PostData),
+	    NewCfg = refresh_access_token(),
+	    io:format("-- NewCfg = ~p~n", [NewCfg]),
 
-		{ok, StatusCode2, RespHeaders2, ClientRef2} = hackney:request(Method, Uri,
-									      UpdatedHeaders2, PostData,
-									      [{pool, googleapi_pool}]),
-		{ok, RespBody2} = get_body(RespHeaders2, ClientRef2),
+	    UpdatedHeaders2 = apply_headers(Headers, NewCfg, PostData),
 
-		{NewCfg, StatusCode2, RespHeaders2, RespBody2};
-	    false ->
-		{ok, RespBody} = get_body(RespHeaders, ClientRef),
-		{NewConfig, StatusCode, RespHeaders, RespBody}
-	end,
-    {NewConfig2, Code, RespHead, FinalRespBody}.
+	    {ok, StatusCode2, RespHeaders2, ClientRef2} = hackney:request(Method, Uri,
+									  UpdatedHeaders2, PostData,
+									  [{pool, googleapi_pool}]),
+	    {ok, RespBody2} = get_body(RespHeaders2, ClientRef2),
+
+	    {StatusCode2, RespHeaders2, RespBody2};
+	false ->
+	    {ok, RespBody} = get_body(RespHeaders, ClientRef),
+	    {StatusCode, RespHeaders, RespBody}
+    end.
 
 
 get_body(Headers, Client)->	    
@@ -209,7 +244,7 @@ refresh_token_file(Config) ->
 
 	    Config_4;
 	_ ->
-	    Config
+	    throw({error, {auth_failed, StatusCode}})
     end.
 		
 
@@ -241,10 +276,10 @@ generate_assertion(Config)->
     Now = now_sec(os:timestamp() ),
     Payload = {[
 	       {<<"aud">>, proplists:get_value(token_uri, Config)},
-	       {<<"scope">>, binary:list_to_bin(proplists:get_value(scope, Config))},
+	       {<<"scope">>, safe_to_bin(proplists:get_value(scope, Config))},
 	       {<<"iat">>, Now},
 	       {<<"exp">>, Now + ?MAX_TOKEN_LIFETIME_SECS},
-	       {<<"iss">>, binary:list_to_bin(proplists:get_value(service_account_name, Config))}
+	       {<<"iss">>, safe_to_bin(proplists:get_value(service_account_name, Config))}
 	      ]},
 
     Private_key = base64:decode(proplists:get_value(private_key, Config)),
@@ -349,3 +384,9 @@ get_app_service_property(Property) when is_binary(Property)->
     RespBody.
 		
 	    
+
+
+safe_to_bin(List) when is_list(List)->
+    binary:list_to_bin(List);
+safe_to_bin(Bin)  when is_binary(Bin)->
+    Bin.
