@@ -19,7 +19,7 @@
 -export([call/4]).
 
 call(Service, Object, Command, Params)->
-    gen_server:call( get_service_name(Service) , {call, {Object, Command, Params}}).
+    handle_call_prepare( Object, Command, Params, Service).
 
 stop(Service) ->
     gen_server:cast(get_service_name(Service), stop).
@@ -27,37 +27,31 @@ stop(Service) ->
 init(Settings)->
     {ok, Settings}.
 
+
+get_object_json(Service, Object)->
+    gen_server:call( get_service_name(Service), {get_object_json, Object}).
+
+get_service(Service)->
+    gen_server:call( get_service_name(Service), get_service).
+
+get_version(Service)->
+    gen_server:call( get_service_name(Service), get_version).
+
+
+
 start_link(Service, Version, Json)->
 
     gen_server:start_link( {local, get_service_name(Service)},  ?MODULE, [{service, Service},
 				     {version, Version},
 				     {json, Json}],[]).
 
-
-handle_call({call, {Object, Command, Params}}, _From, Config) when is_list(Object) ->
-    handle_call({call, {binary:list_to_bin(Object), Command, Params}}, _From, Config);
-
-handle_call({call, {Object, Command, Params}}, _From, Config) when is_list(Command) ->
-    handle_call({call, {Object, binary:list_to_bin(Command), Params}}, _From, Config);
-
-handle_call({call, {Object, Command, Params}}, _From, Config) when is_binary(Command) andalso is_binary(Command) ->
-
-    Media = <<"_media">>,
-    Media_suffix_length = byte_size(<<"_media">>),
-    
-    Match = binary:longest_common_suffix([Command,Media]),
-    {UpdatedCommand, UpdatedParams} = 
-	case Match of 
-	    Media_suffix_length ->
-		{binary:part(Command, 0, byte_size(Command) - Media_suffix_length), [{alt, <<"media">>} |Params ]};
-	    _ ->
-		{Command, %% [{alt, <<"json">>} |
-			   Params %% ]
-		    }
-	end,
-
-    Result = (catch do_handle_call(Object, UpdatedCommand, UpdatedParams, Config)) ,
-    {reply, Result, Config};
+handle_call( get_service, _From, Config) ->
+    {reply, proplists:get_value(service, Config), Config} ;
+handle_call( get_version, _From, Config) ->
+    {reply, proplists:get_value(version, Config), Config} ;
+handle_call( {get_object_json, Object}, _From, Config) ->
+    ObjectJson = service_builder:get_object_json(proplists:get_value(json, Config), Object),
+    {reply, ObjectJson, Config};
 handle_call(_CallData, _From, Config)->
     {reply, ok, Config}.
 
@@ -83,12 +77,38 @@ terminate({error, Reason}, _State) ->
 
 %%% --------------------
 
-do_handle_call(Object, Command, Params, Config)->
-    ObjectJson = service_builder:get_object_json(proplists:get_value(json, Config), Object),
+
+handle_call_prepare(Object, Command, Params, Service) when is_list(Object) ->
+    handle_call_prepare(binary:list_to_bin(Object), Command, Params, Service);
+
+handle_call_prepare(Object, Command, Params, Service) when is_list(Command) ->
+    handle_call_prepare(Object, binary:list_to_bin(Command), Params, Service);
+
+handle_call_prepare(Object, Command, Params, Service) when is_binary(Object) andalso is_binary(Command) ->
+
+    Media = <<"_media">>,
+    Media_suffix_length = byte_size(<<"_media">>),
+    
+    Match = binary:longest_common_suffix([Command,Media]),
+    {UpdatedCommand, UpdatedParams} = 
+	case Match of 
+	    Media_suffix_length ->
+		{binary:part(Command, 0, byte_size(Command) - Media_suffix_length), [{alt, <<"media">>} |Params ]};
+	    _ ->
+		{Command, %% [{alt, <<"json">>} |
+			   Params %% ]
+		    }
+	end,
+
+    (catch do_handle_call(Object, UpdatedCommand, UpdatedParams, Service)).
+
+do_handle_call(Object, Command, Params, Service)->
+    
+    ObjectJson = get_object_json(Service, Object), %% service_builder:get_object_json(proplists:get_value(json, Config), Object),
 
     {MethodJson} = service_builder:get_method_json(ObjectJson, Command),
 
-    case build_request(MethodJson, Params, Command, Config) of
+    case build_request(Service, MethodJson, Params, Command) of
 	{Method, Uri, Headers, Payload} ->
 
 	    case Method of 
@@ -102,7 +122,7 @@ do_handle_call(Object, Command, Params, Config)->
     end.
     
 
-build_request(MethodJson, Params, _Command, Config ) ->
+build_request(Service, MethodJson, Params, _Command ) ->
     %% Methodpath = proplists:get_value(<<"path">>, MethodJson),
 
     BaseUrl = << ?API_URL/binary%%  , ?SLASH/binary, 
@@ -116,7 +136,7 @@ build_request(MethodJson, Params, _Command, Config ) ->
 
     ok = check_required_params(Params, MethodJson),
     
-    {Url, QS, Headers, Post} = build_params(BaseUrl, Params, MethodJson, Config),
+    {Url, QS, Headers, Post} = build_params_pre(Service, BaseUrl, Params, MethodJson),
 
     BinQS = convert_qs_to_bin(QS),
     case BinQS of
@@ -148,13 +168,13 @@ check_required_params_in(Params, [{Pname, {PData} }|RestParameters]) ->
     end.
 
 
-get_command_uri(MethodJson, Config)->
+get_command_uri(Service, MethodJson)->
     case  proplists:get_value(<<"mediaUpload">>, MethodJson) of 
 	undefined ->
 	    Path = proplists:get_value(<<"path">>, MethodJson),
 	    { << ?SLASH/binary, 
-	       (proplists:get_value(service, Config))/binary, ?SLASH/binary,
-	       (proplists:get_value(version, Config))/binary, ?SLASH/binary,
+	       (get_service(Service))/binary, ?SLASH/binary,
+	       (get_version(Service))/binary, ?SLASH/binary,
 	       Path/binary >>, []};
 	{UploadConfig} ->
 	    {Protocols} = proplists:get_value(<<"protocols">>, UploadConfig),
@@ -163,13 +183,13 @@ get_command_uri(MethodJson, Config)->
     end.
     
   
-build_params(BaseUrl, Params , MethodJson, Config) ->
-    {Command, QS} = get_command_uri(MethodJson, Config),
-    build_params(<< BaseUrl/binary, Command/binary >>, Params , MethodJson, Config, {_QS = QS, _Headers = [], _Postbody = <<>>}).
+build_params_pre(Service, BaseUrl, Params , MethodJson) ->
+    {Command, QS} = get_command_uri(Service, MethodJson),
+    build_params(<< BaseUrl/binary, Command/binary >>, Params , MethodJson,  {_QS = QS, _Headers = [], _Postbody = <<>>}).
 
-build_params(BaseUrl, _Params = [] , _MethodJson, _Config, {QS, Headers, Postbody}) ->
+build_params(BaseUrl, _Params = [] , _MethodJson,  {QS, Headers, Postbody}) ->
     {BaseUrl, QS, Headers, Postbody};
-build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], MethodJson, Config, {QS, Headers, Postbody}) ->
+build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], MethodJson, {QS, Headers, Postbody}) ->
     {Parameters} = proplists:get_value(<<"parameters">>, MethodJson),
 
 
@@ -177,14 +197,14 @@ build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], MethodJson,
 	undefined ->
 	    case ParamName of
 		body ->
-		    build_params(BaseUrl, RestParams, MethodJson, Config, {QS, Headers, << Postbody/binary, ParamValue/binary >>} );
+		    build_params(BaseUrl, RestParams, MethodJson,  {QS, Headers, << Postbody/binary, ParamValue/binary >>} );
 		alt ->
-		    build_params(BaseUrl, RestParams, MethodJson, Config, {lists:keystore( ParamName, 1, QS, Param), 
+		    build_params(BaseUrl, RestParams, MethodJson, {lists:keystore( ParamName, 1, QS, Param), 
 									   Headers, << Postbody/binary, ParamValue/binary >>} );
 		'content-type' ->
-		    build_params(BaseUrl, RestParams, MethodJson, Config, {QS, [{<<"Content-Type">>, ParamValue} | Headers], Postbody} );
+		    build_params(BaseUrl, RestParams, MethodJson,  {QS, [{<<"Content-Type">>, ParamValue} | Headers], Postbody} );
 		_ ->
-		    build_params(BaseUrl, RestParams, MethodJson, Config, {QS, Headers, Postbody} )
+		    build_params(BaseUrl, RestParams, MethodJson,  {QS, Headers, Postbody} )
 	    end;
 	{ParamInfo} ->
 
@@ -199,7 +219,7 @@ build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], MethodJson,
 			{Url2, QS, Headers, Postbody}		   
 		end,
 
-	    build_params(NewUrl, RestParams, MethodJson, Config, {NewQS, NewHeaders, NewPostbody} )
+	    build_params(NewUrl, RestParams, MethodJson, {NewQS, NewHeaders, NewPostbody} )
     end.
 
     
