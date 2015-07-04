@@ -175,8 +175,13 @@ handle_request(Method, Uri, Headers, PostData) ->
 		    {ok, RespBody} = get_body(RespHeaders, ClientRef),
 		    {StatusCode, RespHeaders, RespBody}
 	    end;
-	{'EXIT', ExitReason}->
-	    ExitReason
+
+	{error, Reason}->
+	    {error, Reason};
+
+	UnsupportedResult ->
+	    io:format("[auth_http] get unsupported result: ~p~n", [UnsupportedResult]),
+	    UnsupportedResult
     end.
 
 
