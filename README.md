@@ -15,7 +15,13 @@ Init credentials:
     	    		     _Scope="Desired Scope ").
 
 
-Email and pem file are retrieved from "Credentials" screen of GCP project console
+    or
+   
+    googleapi:init_credentials(_JsonFilePath = ?JSON_FILE_PATH,
+                               _Scope="Desired Scope ").
+
+
+Email, json file and pem file are retrieved from "Credentials" screen of GCP project console
 
 For example, working with BigQuery, the scope will be "https://www.googleapis.com/auth/bigquery"
 
