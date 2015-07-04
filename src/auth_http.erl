@@ -17,6 +17,7 @@
 
 
 -export([start_link/3,
+	 start_link/2,
 	 start_link/0,
          init/1,
          code_change/3,
@@ -75,6 +76,21 @@ start_link( )->
 						       {scope, get_app_service_scope()}
 						      ],[]).
 
+start_link(JsonFilePath, Scope)->
+    {ok, Binary} = file:read_file(JsonFilePath),
+    {KeyData} = jiffy:decode(Binary),
+    
+    gen_server:start_link( {local, ?MODULE}, ?MODULE, [
+						       {auth_mode, keyfile},
+						       {service_account_name, proplists:get_value(<<"client_email">>, KeyData)},
+						       {private_key, base64:encode(proplists:get_value(<<"private_key">>, KeyData))},
+						       {private_key_password, 'notasecret'},
+						       {token_uri, ?GOOGLE_TOKEN_URI},
+						       {revoke_uri, ?GOOGLE_REVOKE_URI},
+						       {scope, scopes_to_string(Scope)}
+						      ],[]).
+
+    
 start_link( Service_account_name, Private_key, Scope)->
     {ok, Binary} = file:read_file(Private_key),
     gen_server:start_link( {local, ?MODULE}, ?MODULE, [
