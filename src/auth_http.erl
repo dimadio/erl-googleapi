@@ -153,28 +153,30 @@ handle_request(Method, Uri, Headers, PostData) ->
 
     %% error_logger:info_msg("Send request: ~p~n", [{Method, Uri, UpdatedHeaders, PostData}]),
 
-    {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, Uri,
-							       UpdatedHeaders, PostData,
-							       [{pool, googleapi_pool}]),
+    case hackney:request(Method, Uri,
+			 UpdatedHeaders, PostData,
+			 [{pool, googleapi_pool}]) of 
+	{ok, StatusCode, RespHeaders, ClientRef} ->
+	    case lists:member(StatusCode, ?REFRESH_STATUS_CODES) of 
+		true ->
 
+		    NewCfg = refresh_access_token(),
+		    io:format("-- NewCfg = ~p~n", [NewCfg]),
 
-    case lists:member(StatusCode, ?REFRESH_STATUS_CODES) of 
-	true ->
+		    UpdatedHeaders2 = apply_headers(Headers, NewCfg, PostData),
 
-	    NewCfg = refresh_access_token(),
-	    io:format("-- NewCfg = ~p~n", [NewCfg]),
+		    {ok, StatusCode2, RespHeaders2, ClientRef2} = hackney:request(Method, Uri,
+										  UpdatedHeaders2, PostData,
+										  [{pool, googleapi_pool}]),
+		    {ok, RespBody2} = get_body(RespHeaders2, ClientRef2),
 
-	    UpdatedHeaders2 = apply_headers(Headers, NewCfg, PostData),
-
-	    {ok, StatusCode2, RespHeaders2, ClientRef2} = hackney:request(Method, Uri,
-									  UpdatedHeaders2, PostData,
-									  [{pool, googleapi_pool}]),
-	    {ok, RespBody2} = get_body(RespHeaders2, ClientRef2),
-
-	    {StatusCode2, RespHeaders2, RespBody2};
-	false ->
-	    {ok, RespBody} = get_body(RespHeaders, ClientRef),
-	    {StatusCode, RespHeaders, RespBody}
+		    {StatusCode2, RespHeaders2, RespBody2};
+		false ->
+		    {ok, RespBody} = get_body(RespHeaders, ClientRef),
+		    {StatusCode, RespHeaders, RespBody}
+	    end;
+	{'EXIT', ExitReason}->
+	    ExitReason
     end.
 
 
