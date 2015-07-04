@@ -1,4 +1,6 @@
 ## erl-googleapi
+**Erlang googleapi**
+
 Aim is to build server-side oriented erlang library for work with google API
 
 Working with the lib is simple:
