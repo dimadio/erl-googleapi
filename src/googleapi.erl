@@ -18,52 +18,70 @@
 -export([start_deps/0, init_credentials/3, init_credentials/2, init_credentials/1, close_credentials/0, call/4, stop_client/1]).
 
 
+-type name() :: binary()|string().
+-export_type([name/0]).
 
 %% ===================================================================
 %% Application callbacks
 %% ===================================================================
 
+-spec start(_StartType :: atom(), _StartArgs :: [any()] ) -> {error,_} | {ok,pid()} | {ok,pid(),_} .
 start(_StartType, _StartArgs) ->
     start_deps(),
     googleapi_sup:start_link().
 
+-spec stop(_State :: atom() ) -> ok.
 stop(_State) ->
     ok.
 
+-spec start_deps() -> ok.
 start_deps() ->
     ok = ensure_started([crypto, asn1, public_key, ssl, hackney]).
 
 
+-spec init_credentials( Service_account_name :: name() , 
+			Private_key :: name(), 
+			Scope :: name() | [name() ]) -> {error,_} | {ok,pid()} | {ok,pid(),_} .
 init_credentials(Service_account_name, Private_key, Scope)->
     googleapi_sup:add_child(auth_http, 
 			    auth_http, 
 			    worker, 
 			    [Service_account_name, Private_key, Scope]).
 
+-spec init_credentials( JsonFilePath :: name(), 
+			Scope :: name() | [name() ]) -> {error,_} | {ok,pid()} | {ok,pid(),_} .
 init_credentials(JsonFilePath, Scope)->
     googleapi_sup:add_child(auth_http, 
 			    auth_http, 
 			    worker, 
 			    [JsonFilePath, Scope]).
 
+-spec init_credentials( service ) -> {error,_} | {ok,pid()} | {ok,pid(),_} .
 init_credentials(service)->
     googleapi_sup:add_child(auth_http, 
 			    auth_http, 
 			    worker, 
 			    []).
 
+
+-spec close_credentials()-> ok.
 close_credentials()->
     googleapi_sup:stop_child(auth_http).
 
+
+-spec call(Service :: name(), Object:: name(), Command :: name(), Params :: [name()]) ->
+		  {_StatusCode :: integer(), RespHeaders :: [{binary(), binary()}], binary()} | {error, _}.
 call(Service, Object, Command, Params) ->
     googleapi_client:call(Service, Object, Command, Params).
 
 
+-spec stop_client(Client :: name())-> ok.
 stop_client(Client)->
     googleapi_client:stop(Client).
 %%% service_functions
 
 
+-spec ensure_started([atom()]) -> ok | {error, _}.
 ensure_started([]) ->
     ok;
 ensure_started([App|RestApps]) ->
@@ -75,6 +93,7 @@ ensure_started([App|RestApps]) ->
     end.
 
 
+-spec build(Service::name(), Version :: name()) -> {error,_} | {ok,pid()} | {ok,pid(),_} .
 build(Service, Version) when  is_list(Service)->
     build( binary:list_to_bin(Service), Version);
 

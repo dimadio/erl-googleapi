@@ -27,7 +27,7 @@
          terminate/2,
 	 stop/0]).
 
--export([generate_refresh_request_body/1]).
+%% -export([generate_refresh_request_body/1]).
 
 -export([get/1, get/2, post/3, delete/2]).
 
@@ -193,11 +193,7 @@ handle_request(Method, Uri, Headers, PostData) ->
 	    end;
 
 	{error, Reason}->
-	    {error, Reason};
-
-	UnsupportedResult ->
-	    io:format("[auth_http] get unsupported result: ~p~n", [UnsupportedResult]),
-	    UnsupportedResult
+	    {error, Reason}
     end.
 
 

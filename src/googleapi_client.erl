@@ -18,33 +18,40 @@
 
 -export([call/4]).
 
+-spec call(Service :: googleapi:name(), Object:: googleapi:name(), Command :: googleapi:name(), Params :: [googleapi:name()]) ->
+		  {_StatusCode :: integer(), RespHeaders :: [{binary(), binary()}], binary()} | {error, _}.
 call(Service, Object, Command, Params)->
     handle_call_prepare( Object, Command, Params, Service).
 
+-spec stop(Service::googleapi:name()) -> ok.
 stop(Service) ->
     gen_server:cast(get_service_name(Service), stop).
 
+-spec init([any()])-> {ok, [any()] }.
 init(Settings)->
     {ok, Settings}.
 
-
+-spec get_object_json(Service:: googleapi:name(), Object :: googleapi:name())-> {[any()]} .
 get_object_json(Service, Object)->
     gen_server:call( get_service_name(Service), {get_object_json, Object}).
 
+-spec get_service(Service::googleapi:name())-> binary() .
 get_service(Service)->
     gen_server:call( get_service_name(Service), get_service).
 
+-spec get_version(Service::googleapi:name())-> binary() .
 get_version(Service)->
     gen_server:call( get_service_name(Service), get_version).
 
 
-
+-spec start_link(Service::googleapi:name(), Version::googleapi:name(), Json::binary())->{error,_} | {ok,pid()} | {ok,pid(),_} .
 start_link(Service, Version, Json)->
 
     gen_server:start_link( {local, get_service_name(Service)},  ?MODULE, [{service, Service},
 				     {version, Version},
 				     {json, Json}],[]).
 
+-spec handle_call( any(), _From :: {pid(),_} , any()) -> {reply, any(), any()} .
 handle_call( get_service, _From, Config) ->
     {reply, proplists:get_value(service, Config), Config} ;
 handle_call( get_version, _From, Config) ->
@@ -56,14 +63,13 @@ handle_call(_CallData, _From, Config)->
     {reply, ok, Config}.
 
 handle_cast(stop, State) ->
-
     {stop, normal, State};
 
-handle_cast(_Command, _Config) ->
-    ok.
+handle_cast(_Command, Config) ->
+    {noreply, Config}.
 
-handle_info(_Command, _Config) ->
-    ok.
+handle_info(_Command, Config) ->
+    {noreply, Config}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -101,6 +107,7 @@ handle_call_prepare(Object, Command, Params, Service) when is_binary(Object) and
 	end,
 
     (catch do_handle_call(Object, UpdatedCommand, UpdatedParams, Service)).
+
 
 do_handle_call(Object, Command, Params, Service)->
     

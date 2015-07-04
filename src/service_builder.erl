@@ -6,7 +6,7 @@
 	 get_method_json/2]).
 
  
-
+-spec bring_service_json(Url::googleapi:name())-> {ok, binary()} | {error, [any()], binary() }.
 bring_service_json(Url)->
     Method = get,
     URL = Url,
@@ -48,6 +48,8 @@ get_object_json({JsonList}, Object) when is_binary(Object)->
 	    ObjectJson
     end.
 
+
+-spec get_method_json(Json :: {[any()]}, googleapi:name()) -> any().
 get_method_json(Json, Method) when is_list(Method) ->
     get_method_json(Json, binary:list_to_bin(Method) );
 get_method_json({JsonList}, Method) when is_binary(Method) ->
