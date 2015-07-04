@@ -1,5 +1,7 @@
-## erl-googleapi
+
 **Erlang googleapi**
+
+---
 
 Aim is to build server-side oriented erlang library for work with google API
 
@@ -17,13 +19,21 @@ Init credentials:
     	    		     _Scope="Desired Scope ").
 
 
-    or
+or
    
     googleapi:init_credentials(_JsonFilePath = ?JSON_FILE_PATH,
                                _Scope="Desired Scope ").
 
 
+or
+
+    googleapi:init_credentials(service).
+    
+    
+    
 Email, json file and pem file are retrieved from "Credentials" screen of GCP project console
+
+Initializing as *service* is intended to work inside GCE instance and will use instance permissions and scope
 
 For example, working with BigQuery, the scope will be "https://www.googleapis.com/auth/bigquery"
 
