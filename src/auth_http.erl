@@ -112,7 +112,7 @@ handle_call(get_access_token, _From ,Config)->
     end,
     {reply,  [{access_token, proplists:get_value(access_token, NewConfig) }],  NewConfig};
 
-handle_call(ref_access_token, _From ,Config)->
+handle_call(refresh_access_token, _From ,Config)->
     NewConfig = refresh_token(Config),
     {reply,  [{access_token, proplists:get_value(access_token, NewConfig) }],  NewConfig};
 handle_call(Command, _From, State) ->
