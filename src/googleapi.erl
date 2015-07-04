@@ -15,7 +15,7 @@
 %% Service exports
 -export([build/2]).
 
--export([start_deps/0, init_credentials/3, init_credentials/1, close_credentials/0, call/4, stop_client/1]).
+-export([start_deps/0, init_credentials/3, init_credentials/2, init_credentials/1, close_credentials/0, call/4, stop_client/1]).
 
 
 
@@ -39,6 +39,12 @@ init_credentials(Service_account_name, Private_key, Scope)->
 			    auth_http, 
 			    worker, 
 			    [Service_account_name, Private_key, Scope]).
+
+init_credentials(JsonFilePath, Scope)->
+    googleapi_sup:add_child(auth_http, 
+			    auth_http, 
+			    worker, 
+			    [JsonFilePath, Scope]).
 
 init_credentials(service)->
     googleapi_sup:add_child(auth_http, 
@@ -248,7 +254,7 @@ build_bq_test_()->
      ?_assert(  test_bq_init() == ok  ),
      ?_assertEqual(ok, check_response(googleapi:call("bigquery", "datasets", "list", [{<<"projectId">>, <<"wixpop-gce">>}])) ),
      ?_assertEqual(ok, check_response(googleapi:call("bigquery", "tables", "list", [{<<"projectId">>, <<"wixpop-gce">>},
-											  {<<"datasetId">>, <<"prospero">>}])) ),
+     											  {<<"datasetId">>, <<"prospero">>}])) ),
 
      ?_assertEqual(ok, googleapi:stop_client("bigquery")),
      ?_assertEqual(ok, googleapi:close_credentials())
