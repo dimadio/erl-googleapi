@@ -184,6 +184,8 @@ handle_request(Method, Uri, Headers, PostData) ->
 		    {ok, StatusCode2, RespHeaders2, ClientRef2} = hackney:request(Method, Uri,
 										  UpdatedHeaders2, PostData,
 										  [{pool, googleapi_pool}]),
+
+		    
 		    {ok, RespBody2} = get_body(RespHeaders2, ClientRef2),
 
 		    {StatusCode2, RespHeaders2, RespBody2};
@@ -197,7 +199,7 @@ handle_request(Method, Uri, Headers, PostData) ->
     end.
 
 
-get_body(Headers, Client)->	    
+get_body(Headers, Client)->
     ContentLength = proplists:get_value(<<"Content-Length">>, Headers, <<"0">>),
     IntContentLength = list_to_integer(binary:bin_to_list(ContentLength)),
 
@@ -205,8 +207,21 @@ get_body(Headers, Client)->
 	N when is_integer(N) andalso N > 0 ->
 	    {ok, Body,_ } = hackney:body(Client),
 	    {ok, Body};
-	N when is_integer(N) andalso N =:= 0 ->
-	    {ok, <<>>}
+	N when is_integer(N) andalso N =:= 0 -> %% chunked ?
+	    fetch_body(Client)
+    end.
+
+fetch_body( Ref)  ->
+    fetch_body(Ref , <<>>).
+
+fetch_body( Ref, Acc)  ->
+    case hackney:stream_body(Ref) of
+        {ok, Data, NewRef} ->
+            fetch_body(NewRef, << Acc/binary, Data/binary >>);
+        { done, _Ref} ->
+            {ok, Acc};
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 refresh_token(Config) ->
