@@ -192,11 +192,11 @@ get_command_uri(Service, MethodJson)->
   
 build_params_pre(Service, BaseUrl, Params , MethodJson) ->
     {Command, QS} = get_command_uri(Service, MethodJson),
-    build_params(<< BaseUrl/binary, Command/binary >>, Params , MethodJson,  {_QS = QS, _Headers = [], _Postbody = <<>>}).
+    build_params(<< BaseUrl/binary, Command/binary >>, Params , Params,  MethodJson,  {_QS = QS, _Headers = [], _Postbody = <<>>}).
 
-build_params(BaseUrl, _Params = [] , _MethodJson,  {QS, Headers, Postbody}) ->
+build_params(BaseUrl, _Params = [] , _AllParams, _MethodJson,  {QS, Headers, Postbody}) ->
     {BaseUrl, QS, Headers, Postbody};
-build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], MethodJson, {QS, Headers, Postbody}) ->
+build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], AllParams, MethodJson, {QS, Headers, Postbody}) ->
     {Parameters} = proplists:get_value(<<"parameters">>, MethodJson),
 
 
@@ -204,14 +204,22 @@ build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], MethodJson,
 	undefined ->
 	    case ParamName of
 		body ->
-		    build_params(BaseUrl, RestParams, MethodJson,  {QS, Headers, << Postbody/binary, ParamValue/binary >>} );
+		    %% check if we have alt = media in params. if not - put json as content-type
+		    case proplists:get_value(alt, AllParams) of
+			<<"media">> ->
+			    build_params(BaseUrl, RestParams, AllParams, MethodJson,  {QS, Headers, << Postbody/binary, ParamValue/binary >>} );
+			_ ->
+			    build_params(BaseUrl, RestParams, AllParams, MethodJson,  {QS, 
+										       [{<<"Content-Type">>, <<"application/json">>} | Headers], 
+										       << Postbody/binary, ParamValue/binary >>} )
+		    end;
 		alt ->
-		    build_params(BaseUrl, RestParams, MethodJson, {lists:keystore( ParamName, 1, QS, Param), 
+		    build_params(BaseUrl, RestParams, AllParams, MethodJson, {lists:keystore( ParamName, 1, QS, Param), 
 									   Headers, << Postbody/binary, ParamValue/binary >>} );
 		'content-type' ->
-		    build_params(BaseUrl, RestParams, MethodJson,  {QS, [{<<"Content-Type">>, ParamValue} | Headers], Postbody} );
+		    build_params(BaseUrl, RestParams, AllParams, MethodJson,  {QS, [{<<"Content-Type">>, ParamValue} | Headers], Postbody} );
 		_ ->
-		    build_params(BaseUrl, RestParams, MethodJson,  {QS, Headers, Postbody} )
+		    build_params(BaseUrl, RestParams, AllParams, MethodJson,  {QS, Headers, Postbody} )
 	    end;
 	{ParamInfo} ->
 
@@ -226,7 +234,7 @@ build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], MethodJson,
 			{Url2, QS, Headers, Postbody}		   
 		end,
 
-	    build_params(NewUrl, RestParams, MethodJson, {NewQS, NewHeaders, NewPostbody} )
+	    build_params(NewUrl, RestParams, AllParams, MethodJson, {NewQS, NewHeaders, NewPostbody} )
     end.
 
     
