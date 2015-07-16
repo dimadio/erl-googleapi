@@ -46,3 +46,17 @@ Init the API client:
 Calling object methods:
 
     googleapi_client:call("bigquery", "datasets", "list", [{<<"projectId">>, <<"project name">>}]).
+
+Insert data to BigQuery:
+
+    Datarow = {[
+                {<<"kind">>, <<"bigquery#tableDataInsertAllRequest">>},
+                {<<"skipInvalidRows">>, <<"false">> },
+                {<<"ignoreUnknownValues">>, <<"true">>},
+                {<<"rows">>, [ ... ]} ]}
+    Dataset_Json = jiffy:encode(Datarow),
+    {Code, Headers , InsertResult} = googleapi:call("bigquery", "tabledata","insertAll",
+                                                       [{<<"projectId">>, ?PROJECT_ID},
+                                                        {<<"datasetId">>, ?DATASET},
+                                                        {<<"tableId">>, ?TABLENAME},
+                                                        {body, Dataset_Json }]).
