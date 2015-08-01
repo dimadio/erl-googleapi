@@ -6,6 +6,8 @@
 -define(SLASH, <<"/">>).
 
 
+-type setting() ::  {term(), term() }.
+-type state() :: [setting() ].
 
 -export([start_link/3,
          init/1,
@@ -27,7 +29,7 @@ call(Service, Object, Command, Params)->
 stop(Service) ->
     gen_server:cast(get_service_name(Service), stop).
 
--spec init([any()])-> {ok, [any()] }.
+-spec init(state())-> {ok, state() }.
 init(Settings)->
     {ok, Settings}.
 
@@ -44,14 +46,14 @@ get_version(Service)->
     gen_server:call( get_service_name(Service), get_version).
 
 
--spec start_link(Service::googleapi:name(), Version::googleapi:name(), Json::binary())->{error,_} | {ok,pid()} | {ok,pid(),_} .
+-spec start_link(Service::googleapi:name(), Version::googleapi:name(), Json::binary())->{error,_} | {ok,pid()} | {ok,pid(),state()} .
 start_link(Service, Version, Json)->
 
     gen_server:start_link( {local, get_service_name(Service)},  ?MODULE, [{service, Service},
-				     {version, Version},
-				     {json, Json}],[]).
+									  {version, Version},
+									  {json, Json}],[]).
 
--spec handle_call( any(), _From :: {pid(),_} , any()) -> {reply, any(), any()} .
+-spec handle_call( get_service|get_version|{get_object_json, Object::list()}, _From :: {pid(), state()} , any()) -> {reply, any(), state()} .
 handle_call( get_service, _From, Config) ->
     {reply, proplists:get_value(service, Config), Config} ;
 handle_call( get_version, _From, Config) ->
@@ -62,18 +64,22 @@ handle_call( {get_object_json, Object}, _From, Config) ->
 handle_call(_CallData, _From, Config)->
     {reply, ok, Config}.
 
+-spec handle_cast(stop, state()) ->{stop, normal, state()} | {noreply, state()}.
 handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(_Command, Config) ->
     {noreply, Config}.
 
+-spec handle_info(any(), state()) -> {noreply, state() }.
 handle_info(_Command, Config) ->
     {noreply, Config}.
 
+-spec code_change(any(), state(), any()) -> {ok, state() }.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+-spec terminate(normal|{error, any()}, state()) -> ok | {error, any() }.
 terminate(normal, _State) ->
     ok;
 terminate({error, Reason}, _State) ->
@@ -83,7 +89,7 @@ terminate({error, Reason}, _State) ->
 
 %%% --------------------
 
-
+-spec handle_call_prepare(googleapi:name(), googleapi:name(), list(), googleapi:name()) -> auth_http:http_response().
 handle_call_prepare(Object, Command, Params, Service) when is_list(Object) ->
     handle_call_prepare(binary:list_to_bin(Object), Command, Params, Service);
 
@@ -109,15 +115,15 @@ handle_call_prepare(Object, Command, Params, Service) when is_binary(Object) and
     (catch do_handle_call(Object, UpdatedCommand, UpdatedParams, Service)).
 
 
+-spec do_handle_call(googleapi:name(), googleapi:name(), list(), googleapi:name()) -> auth_http:http_response().
 do_handle_call(Object, Command, Params, Service)->
-    
-    ObjectJson = get_object_json(Service, Object), %% service_builder:get_object_json(proplists:get_value(json, Config), Object),
+
+    ObjectJson = get_object_json(Service, Object),
 
     {MethodJson} = service_builder:get_method_json(ObjectJson, Command),
 
-    case build_request(Service, MethodJson, Params, Command) of
+    case build_request(Service, MethodJson, Params) of
 	{Method, Uri, Headers, Payload} ->
-
 	    case Method of 
 		<<"GET">> ->
 		    auth_http:get(Uri, Headers);
@@ -128,8 +134,8 @@ do_handle_call(Object, Command, Params, Service)->
 	    end
     end.
     
-
-build_request(Service, MethodJson, Params, _Command ) ->
+-spec build_request(Service::googleapi:name(), MethodJson::[tuple()], Params::list() ) -> {binary(), binary(), [{term(), term()}], binary() }.
+build_request(Service, MethodJson, Params ) ->
     %% Methodpath = proplists:get_value(<<"path">>, MethodJson),
 
     BaseUrl = << ?API_URL/binary%%  , ?SLASH/binary, 
@@ -154,10 +160,13 @@ build_request(Service, MethodJson, Params, _Command ) ->
     end.
 		 
 
+-spec check_required_params(Params::list(), MethodJson::[tuple()]) -> ok.
 check_required_params(Params, MethodJson) ->
     {Parameters} = proplists:get_value(<<"parameters">>, MethodJson),
     check_required_params_in(Params, Parameters).
 
+
+-spec check_required_params_in(list(), list() ) -> ok.
 check_required_params_in(_Params, _Parameters = [])->
     ok;
 check_required_params_in(Params, [{Pname, {PData} }|RestParameters]) ->
@@ -175,6 +184,7 @@ check_required_params_in(Params, [{Pname, {PData} }|RestParameters]) ->
     end.
 
 
+-spec get_command_uri(Service::googleapi:name(), MethodJson::[tuple()])-> { binary(), [{term(), term()}]}.
 get_command_uri(Service, MethodJson)->
     case  proplists:get_value(<<"mediaUpload">>, MethodJson) of 
 	undefined ->
@@ -190,10 +200,16 @@ get_command_uri(Service, MethodJson)->
     end.
     
   
+-spec build_params_pre(Service::googleapi:name(), BaseUrl::binary(), Params::list() , MethodJson::[tuple()]) -> 
+			      {Url::binary(), QS::[{term(), term()}], Headers::[{term(), term()}], Post::binary()}.
 build_params_pre(Service, BaseUrl, Params , MethodJson) ->
     {Command, QS} = get_command_uri(Service, MethodJson),
     build_params(<< BaseUrl/binary, Command/binary >>, Params , Params,  MethodJson,  {_QS = QS, _Headers = [], _Postbody = <<>>}).
 
+
+-spec build_params(BaseUrl::binary(), Params::list() , AllParams::list(), MethodJson::[tuple()],  
+		   {QS::[{term(), term()}], Headers::[{term(), term()}], Postbody::binary()}) ->
+			  {Url::binary(), QS::[{term(), term()}], Headers::[{term(), term()}], Post::binary()}.
 build_params(BaseUrl, _Params = [] , _AllParams, _MethodJson,  {QS, Headers, Postbody}) ->
     {BaseUrl, QS, Headers, Postbody};
 build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], AllParams, MethodJson, {QS, Headers, Postbody}) ->
@@ -237,14 +253,13 @@ build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], AllParams, 
 	    build_params(NewUrl, RestParams, AllParams, MethodJson, {NewQS, NewHeaders, NewPostbody} )
     end.
 
-    
+
+-spec convert_qs_to_bin(QS::[{term(), term()}])-> binary().
 convert_qs_to_bin(QS)->
     binary:list_to_bin(utils:url_encode(QS)).
 
 
-
-
-
+-spec get_service_name(Service:: binary()|list()|atom()) -> atom().
 get_service_name(Service) when is_binary(Service) ->
     list_to_atom(binary:bin_to_list(Service));
 

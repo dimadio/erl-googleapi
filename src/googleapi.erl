@@ -2,6 +2,7 @@
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
+
 -define(USER_EMAIL, "EMAIL").
 -define(PEM_FILE, "PEM FILE").
 
@@ -115,7 +116,8 @@ build(Service, Version) when is_binary(Service) andalso is_binary(Version) ->
 
 -ifdef(TEST).
 
-check_response_delete({Code, _RespHead, _RespBody}) ->
+check_response_delete({Code, _RespHead, RespBody}) ->
+    ?debugFmt("Delete response : ~p, ~p~n", [Code, RespBody]),
     case Code of
 	204 ->
 	    ok;
@@ -236,9 +238,9 @@ build_test_()->
 		   check_response(googleapi:call("storage", "objects", "get_media", [{<<"bucket">>,Bucket_name},
 											    {<<"object">>, <<"erltest3.txt">>}])) ),
 
-     ?_assertEqual(ok, 
+     {timeout, 1000, ?_assertEqual(ok, 
 		   check_response_delete(googleapi:call("storage", "objects", "delete", [{<<"bucket">>,Bucket_name},
-												{<<"object">>, <<"erltest3.txt">>}])) ),
+												{<<"object">>, <<"erltest3.txt">>}])) ) },
 
 
      ?_assertEqual(ok, 

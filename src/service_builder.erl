@@ -27,6 +27,7 @@ bring_service_json(Url)->
     end.
 
 
+-spec validate_service_json(Json::{[tuple()]}, Service::googleapi:name(), Version::googleapi:name())-> ok | {error, _}.
 validate_service_json(Json, Service, Version)->
     {JsonList} = Json,
     case {proplists:get_value(<<"name">>, JsonList),
@@ -37,6 +38,7 @@ validate_service_json(Json, Service, Version)->
 	    {error , Other}
     end.
 
+-spec get_object_json(Json::{[tuple()]}, Object::googleapi:name()) -> {[tuple()]}.
 get_object_json(Json, Object) when is_list(Object)->
     get_object_json(Json, binary:list_to_bin(Object));
 get_object_json({JsonList}, Object) when is_binary(Object)->

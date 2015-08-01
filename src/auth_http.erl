@@ -15,6 +15,9 @@
 -include_lib("public_key/include/public_key.hrl"). 
 
 
+-type http_response() :: {Code::integer(), Headers::[{term(), term}], Body::binary() }.
+-export_type([http_response/0]).
+
 
 -export([start_link/3,
 	 start_link/2,
@@ -33,29 +36,34 @@
 
 -export([get_access_token/0, refresh_access_token/0]).
 
+-spec get(Url::binary() ) -> http_response().
 get(Uri) ->
     get(Uri, _Headers = []).
 get( Uri, Headers)->
     handle_request(get, Uri, Headers).
 
+-spec post(Uri::binary(), Headers::[{term(), term()}], Postdata::binary())-> http_response().
 post(Uri, Headers, Postdata)->
     handle_request(post, Uri, Headers, Postdata).
 
-
+-spec delete(Uri::binary(), Headers::[{term(), term()}])-> http_response().
 delete(Uri, Headers)->
     handle_request( delete, Uri, Headers).
 
+-spec stop()-> ok.
 stop() ->
     gen_server:cast(?MODULE, stop).
 
-
+-spec get_access_token()-> [{access_token, binary()}].
 get_access_token()->
     gen_server:call( ?MODULE, get_access_token).
 
+-spec refresh_access_token() -> [{access_token, binary()}].
 refresh_access_token()->
     gen_server:call( ?MODULE, refresh_access_token).
 
 
+-spec init([{term(), term()}]) -> {ok, [{term(), term()}]}.
 init(Settings)->
     PoolName = googleapi_pool,
     Options = [{timeout, 150000}, {max_connections, 100}],
@@ -67,6 +75,7 @@ init(Settings)->
     {ok, Settings}.
 
 
+-spec start_link( )-> {ok, pid() }.
 start_link( )->
     gen_server:start_link( {local, ?MODULE}, ?MODULE, [
 						       {auth_mode, appscope},
@@ -76,6 +85,7 @@ start_link( )->
 						       {scope, get_app_service_scope()}
 						      ],[]).
 
+-spec start_link(JsonFilePath::filename:file_any(), Scope::[string()] )-> {ok, pid()}.
 start_link(JsonFilePath, Scope)->
     {ok, Binary} = file:read_file(JsonFilePath),
     {KeyData} = jiffy:decode(Binary),
@@ -90,7 +100,7 @@ start_link(JsonFilePath, Scope)->
 						       {scope, scopes_to_string(Scope)}
 						      ],[]).
 
-    
+-spec start_link( Service_account_name::binary(), Private_key::filename:file_any(), Scope::[string()])-> {ok, pid() }.
 start_link( Service_account_name, Private_key, Scope)->
     {ok, Binary} = file:read_file(Private_key),
     gen_server:start_link( {local, ?MODULE}, ?MODULE, [
@@ -104,7 +114,7 @@ start_link( Service_account_name, Private_key, Scope)->
 						      ],[]).
 
 
-
+-spec handle_call(get_access_token|refresh_access_token, From::{pid(),_} ,Config::[{term(), term()}])-> {reply, any(), [{term(), term()}] }.
 handle_call(get_access_token, _From ,Config)->
     AccessToken = proplists:get_value(access_token, Config),
 
@@ -136,20 +146,23 @@ handle_call(Command, _From, State) ->
     {noreply, State}.
 
 
-
+-spec handle_cast(stop, State::[{term(), term()}]) -> {'noreply',_} | {'noreply',_,'hibernate' | 'infinity' | non_neg_integer()} | {'stop',_,_}.
 handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(Command, State) ->
     error_logger:info_msg("Unsupported command: ~p~n", [Command]),
     {noreply, State}.
 
+-spec handle_info(Command::any(),State::[{term(), term()}]) -> {noreply, [{term(), term()}] }.
 handle_info(Command,State) ->
     error_logger:info_msg("Unsupported command: ~p~n", [Command]),
     {noreply, State}.
 
+-spec code_change(any(), [{term(), term()}], any()) -> {ok, [{term(), term()}] }.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+-spec terminate(Reason::atom(), [{term(), term()}]) -> ok.
 terminate(normal, _State) ->
     hackney_pool:stop_pool(googleapi_pool),
     ok.
@@ -157,9 +170,12 @@ terminate(normal, _State) ->
 
 
 %% -----------------------
-
+-spec handle_request(Method::atom(), Uri::binary(), Headers::[{term(), term()}]) -> http_response().
 handle_request(Method, Uri, Headers) ->
     handle_request(Method, Uri, Headers, <<>>).
+
+
+-spec handle_request(Method::atom(), Uri::binary(), Headers::[{term(), term()}], PostData::binary()) -> http_response().
 handle_request(Method, Uri, Headers, PostData) ->
 
 
@@ -198,7 +214,7 @@ handle_request(Method, Uri, Headers, PostData) ->
 	    {error, Reason}
     end.
 
-
+-spec get_body(Headers :: [{term(), term()}], Client::any()) -> {ok, binary()} | {error, _}.
 get_body(Headers, Client)->
     ContentLength = proplists:get_value(<<"Content-Length">>, Headers, <<"0">>),
     IntContentLength = list_to_integer(binary:bin_to_list(ContentLength)),
@@ -211,6 +227,7 @@ get_body(Headers, Client)->
 	    fetch_body(Client)
     end.
 
+-spec fetch_body(Ref::_) -> {ok, binary()} | {error, _}.
 fetch_body( Ref)  ->
     fetch_body(Ref , <<>>).
 
@@ -224,6 +241,7 @@ fetch_body( Ref, Acc)  ->
             {error, Reason}
     end.
 
+-spec refresh_token([{term(), term()}]) -> [{term(), term()}].
 refresh_token(Config) ->
     case proplists:get_value(auth_mode, Config, undefined) of 
 	appscope ->
@@ -232,6 +250,7 @@ refresh_token(Config) ->
 	    refresh_token_file(Config)
     end.
     
+-spec refresh_token_service([{term(), term()}]) -> [{term(), term()}].
 refresh_token_service(Config) ->
     TokenData = get_app_service_property(<<"token">>),
     {RespJson} = jiffy:decode(TokenData),
@@ -247,6 +266,7 @@ refresh_token_service(Config) ->
     end.
 
 
+-spec refresh_token_file([{term(), term()}]) -> [{term(), term()}].
 refresh_token_file(Config) ->
     Body = utils:build_body(generate_refresh_request_body(Config)),
     Headers = generate_refresh_request_headers(Config),
@@ -281,7 +301,7 @@ refresh_token_file(Config) ->
 	    throw({error, {auth_failed, StatusCode}})
     end.
 		
-
+-spec generate_refresh_request_headers(Config::_) -> [{binary(), binary()}].
 generate_refresh_request_headers(_Config) ->
     Headers = [
 	       {<<"content-type">>, <<"application/x-www-form-urlencoded">>}
@@ -291,6 +311,7 @@ generate_refresh_request_headers(_Config) ->
     %%    headers['user-agent'] = self.user_agent
     Headers.   
 
+-spec generate_refresh_request_body(Config:: [{term(), term()}])-> [{atom(), term()}].
 generate_refresh_request_body(Config)->
 	    Assertion = generate_assertion(Config),
 
@@ -299,12 +320,14 @@ generate_refresh_request_body(Config)->
 	    ].
 
 
+-spec scopes_to_string(string()|[string()]) -> string().
 scopes_to_string([H|_Rest] = Scopes) when is_list(H)->
     string:join(Scopes, " ");
 scopes_to_string([H|_Rest] = Scopes) when is_integer(H)->
     Scopes.
 
 
+-spec generate_assertion(Config:: [{term(), term()}])->binary().
 generate_assertion(Config)->
     %%5 Generate the assertion that will be used in the request.
     Now = now_sec(os:timestamp() ),
@@ -320,11 +343,13 @@ generate_assertion(Config)->
     Key = key_from_string(Private_key, proplists:get_value(private_key_password, Config)), 
     make_signed_jwt(Key,  Payload).
 
+-spec key_from_string(Private_key::binary(), Private_key_password::any()) -> tuple().
 key_from_string(Private_key, _Private_key_password)->
     [DSAEntry] = public_key:pem_decode(Private_key),
     public_key:pem_entry_decode(DSAEntry).
 
-	
+     
+-spec make_signed_jwt(Key::any(), Payload::any())->binary().
 make_signed_jwt(Key, Payload)->
 
     Header = {[{<<"typ">>,<<"JWT">>}, {<<"alg">>,<<"RS256">>}]},
@@ -365,6 +390,7 @@ make_signed_jwt(Key, Payload)->
     binary:list_to_bin(StrRes).
 
 
+-spec apply_headers(Headers::[{term(), term()}], Config::[{term(), term()}], PostData::binary())  -> [{term(), term()}].
 apply_headers(Headers, Config, PostData)  ->
     Access_token = proplists:get_value(access_token, Config),
     HeadersWithAuth = [{<<"accept">>, <<"application/json">>} | 
@@ -377,10 +403,12 @@ apply_headers(Headers, Config, PostData)  ->
 	    [{<<"Content-Length">>, byte_size(PostData)}| HeadersWithAuth]
     end.
 
+-spec now_sec({MegaSecs::integer(),Secs::integer(), MicroSecs::integer()})->integer().
 now_sec({MegaSecs,Secs,_MicroSecs})->
     (MegaSecs*1000000 + Secs).
 
 
+-spec '_json_encode'({[tuple()]}) -> binary().
 '_json_encode'(Object)->
     
     case (catch jiffy:encode(Object) ) of 
@@ -390,7 +418,7 @@ now_sec({MegaSecs,Secs,_MicroSecs})->
 	    Res
     end.
 
-
+-spec '_urlsafe_b64encode'(String::binary())->  binary().
 '_urlsafe_b64encode'(String)->
     Encoded = base64:encode(String),
     EncodedStr = binary:bin_to_list(Encoded),
@@ -399,13 +427,15 @@ now_sec({MegaSecs,Secs,_MicroSecs})->
 
 
 %% @doc returns binary of instance default service account
+-spec get_app_service_account()->binary().
 get_app_service_account()->
     get_app_service_property(<<"email">>).
 
-
+-spec get_app_service_scope()->binary().
 get_app_service_scope()->
     get_app_service_property(<<"scopes">>).
 
+-spec get_app_service_property(Property::binary())  -> binary().
 get_app_service_property(Property) when is_binary(Property)->
     BaseUrl = <<"http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/">>,
     Url = << BaseUrl/binary, Property/binary >>,
@@ -419,7 +449,7 @@ get_app_service_property(Property) when is_binary(Property)->
 		
 	    
 
-
+-spec safe_to_bin(list()|binary()) -> binary().
 safe_to_bin(List) when is_list(List)->
     binary:list_to_bin(List);
 safe_to_bin(Bin)  when is_binary(Bin)->

@@ -11,6 +11,7 @@
 url_encode(Data) ->
     url_encode(Data,"").
 
+-spec(url_encode(list(), string()) -> string()).
 url_encode([],Acc) ->
     Acc;
 
@@ -26,10 +27,11 @@ url_encode([{Key,Value}|R],Acc) ->
     url_encode(R, Acc ++ "&" ++ edoc_lib:escape_uri(Key) ++ "=" ++ edoc_lib:escape_uri(Value)).
 
 
-
+-spec build_body(Data::[{term(), term()}])->binary().
 build_body(Data)->
     build_body(Data, <<>>).
 
+-spec build_body(Data::[{term(), term()}], binary())->binary().
 build_body([], Acc)->
     Acc;
 
