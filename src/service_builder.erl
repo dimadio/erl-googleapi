@@ -13,9 +13,11 @@ bring_service_json(Url)->
     Headers = [],
     Payload = <<>>,
     Options = [],
+    lager:info("Do ~p on ~p",[Method, URL]),
     {ok, StatusCode, _RespHeaders, ClientRef} = hackney:request(Method, URL,
                                                         Headers, Payload,
-							       Options),
+								Options),
+    lager:info("StatusCode = ~p", [StatusCode]),
     {ok, Body, _Client2} = hackney:body(ClientRef),
 
     case StatusCode of 

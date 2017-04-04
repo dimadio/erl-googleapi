@@ -1,5 +1,7 @@
 -module(googleapi_client).
 
+
+
 -behaviour(gen_server).
 
 -define(API_URL, <<"https://www.googleapis.com">>).
@@ -33,6 +35,10 @@ stop(Service) ->
 init(Settings)->
     {ok, Settings}.
 
+-spec get_service_root_url(Service:: googleapi:name() ) -> binary().
+get_service_root_url(Service)->
+    gen_server:call( get_service_name(Service), get_service_root_url ).
+
 -spec get_object_json(Service:: googleapi:name(), Object :: googleapi:name())-> {[any()]} .
 get_object_json(Service, Object)->
     gen_server:call( get_service_name(Service), {get_object_json, Object}).
@@ -58,6 +64,14 @@ handle_call( get_service, _From, Config) ->
     {reply, proplists:get_value(service, Config), Config} ;
 handle_call( get_version, _From, Config) ->
     {reply, proplists:get_value(version, Config), Config} ;
+handle_call(get_service_root_url, _From, Config) ->
+    {Json} = proplists:get_value(json, Config),
+    case proplists:get_value(<<"baseUrl">>, Json) of 
+	undefined ->
+	    {reply, proplists:get_value(<<"rootUrl">>, Json), Config} ;
+	Value ->
+	    {reply, Value, Config}
+    end;
 handle_call( {get_object_json, Object}, _From, Config) ->
     ObjectJson = service_builder:get_object_json(proplists:get_value(json, Config), Object),
     {reply, ObjectJson, Config};
@@ -126,8 +140,10 @@ do_handle_call(Object, Command, Params, Service)->
 	{Method, Uri, Headers, Payload} ->
 	    case Method of 
 		<<"GET">> ->
+		    lager:info("Uri: ~p, Headers:~p~n", [Uri, Headers]),
 		    auth_http:get(Uri, Headers);
 		<<"POST">> ->
+		    lager:info("POST Uri: ~p, Headers:~p~n", [Uri, Headers]),
 		    auth_http:post(Uri, Headers, Payload);
 		<<"DELETE">> ->
 		    auth_http:delete(Uri, Headers)
@@ -138,12 +154,12 @@ do_handle_call(Object, Command, Params, Service)->
 build_request(Service, MethodJson, Params ) ->
     %% Methodpath = proplists:get_value(<<"path">>, MethodJson),
 
-    BaseUrl = << ?API_URL/binary%%  , ?SLASH/binary, 
-		 %% (proplists:get_value(service, Config))/binary, ?SLASH/binary,
-		 %% (proplists:get_value(version, Config))/binary, ?SLASH/binary
-		 %% ,
-		 %% Methodpath/binary 
-	      >>,
+    BaseUrl = get_service_root_url(Service),%% << ?API_URL/binary%%  , ?SLASH/binary, 
+	      %% 	 %% (proplists:get_value(service, Config))/binary, ?SLASH/binary,
+	      %% 	 %% (proplists:get_value(version, Config))/binary, ?SLASH/binary
+	      %% 	 %% ,
+	      %% 	 %% Methodpath/binary 
+	      %% >>,
 
     Method = proplists:get_value(<<"httpMethod">>, MethodJson),
 
@@ -189,9 +205,9 @@ get_command_uri(Service, MethodJson)->
     case  proplists:get_value(<<"mediaUpload">>, MethodJson) of 
 	undefined ->
 	    Path = proplists:get_value(<<"path">>, MethodJson),
-	    { << ?SLASH/binary, 
-	       (get_service(Service))/binary, ?SLASH/binary,
-	       (get_version(Service))/binary, ?SLASH/binary,
+	    { << %% ?SLASH/binary, 
+	       %% (get_service(Service))/binary, ?SLASH/binary,
+	       %% (get_version(Service))/binary, ?SLASH/binary,
 	       Path/binary >>, []};
 	{UploadConfig} ->
 	    {Protocols} = proplists:get_value(<<"protocols">>, UploadConfig),
@@ -247,7 +263,7 @@ build_params(BaseUrl, [{ParamName, ParamValue} = Param |RestParams], AllParams, 
 			{BaseUrl, lists:keystore( ParamName, 1, QS, Param), Headers, Postbody};
 		    <<"path">> ->
 			Url2 = binary:replace(BaseUrl, << <<"{">>/binary, ParamName/binary, <<"}">>/binary >>, ParamValue),
-			{Url2, QS, Headers, Postbody}		   
+			{Url2, QS, Headers, Postbody}
 		end,
 
 	    build_params(NewUrl, RestParams, AllParams, MethodJson, {NewQS, NewHeaders, NewPostbody} )

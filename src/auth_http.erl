@@ -56,7 +56,7 @@ stop() ->
 
 -spec get_access_token()-> [{access_token, binary()}].
 get_access_token()->
-    gen_server:call( ?MODULE, get_access_token).
+    gen_server:call( ?MODULE, get_access_token, _Timeout = 60000).
 
 -spec refresh_access_token() -> [{access_token, binary()}].
 refresh_access_token()->
@@ -66,12 +66,13 @@ refresh_access_token()->
 -spec init([{term(), term()}]) -> {ok, [{term(), term()}]}.
 init(Settings)->
     PoolName = googleapi_pool,
-    Options = [{timeout, 150000}, {max_connections, 100}],
+    Options = [{timeout, 300000}, {max_connections, 100}],
     ok  = case  hackney_pool:start_pool(PoolName, Options) of
 	      {ok, _PoolPid} -> ok;
 	      {error, {already_started, _PoolPid}} -> ok;
 	      Other -> Other
 	  end,
+    lager:info("Pool started "),
     {ok, Settings}.
 
 
@@ -271,7 +272,8 @@ refresh_token_file(Config) ->
     Body = utils:build_body(generate_refresh_request_body(Config)),
     Headers = generate_refresh_request_headers(Config),
 
-
+    lager:info("POST to ~p with Headers ~p", [?GOOGLE_TOKEN_URI, Headers] ),
+    lager:info("Payload: ~p", [Body]),
     {ok, StatusCode, _RespHeaders, ClientRef} = hackney:request(post, ?GOOGLE_TOKEN_URI,
 								Headers, Body,
 								[{pool, googleapi_pool}]),
@@ -300,7 +302,7 @@ refresh_token_file(Config) ->
 	_ ->
 	    throw({error, {auth_failed, StatusCode}})
     end.
-		
+
 -spec generate_refresh_request_headers(Config::_) -> [{binary(), binary()}].
 generate_refresh_request_headers(_Config) ->
     Headers = [
@@ -396,7 +398,7 @@ apply_headers(Headers, Config, PostData)  ->
     HeadersWithAuth = [{<<"accept">>, <<"application/json">>} | 
 		       lists:keystore(<<"Authorization">>, 1, Headers, 
 				      {<<"Authorization">>, << <<"Bearer ">>/binary, Access_token/binary >>})],
-    case PostData of 
+    case PostData of
 	<<>> ->
 	    HeadersWithAuth;
 	_ ->
